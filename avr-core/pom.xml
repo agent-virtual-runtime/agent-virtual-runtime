@@ -5,7 +5,7 @@
     <parent>
         <groupId>org.agentvirtualruntime</groupId>
         <artifactId>avr-parent</artifactId>
-        <version>0.1.0-SNAPSHOT</version>
+        <version>1.0.0</version>
     </parent>
     <artifactId>avr-core</artifactId>
     <name>AVR Core</name>
@@ -20,6 +20,11 @@
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.agentvirtualruntime</groupId>
+            <artifactId>avr-storage</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>
-

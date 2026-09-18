@@ -1,69 +1,157 @@
 # Agent Virtual Runtime (AVR)
 
-> A lightweight virtual world for AI agents.
+[English](README.md) | [简体中文](README_CN.md)
 
-Agent Virtual Runtime is a Java 11+ runtime for building centralized AI agents without provisioning a container or VM for every run. It owns the agent loop and exposes a virtual environment made of structured capabilities such as virtual files, commands, skills, and artifacts.
+> A lightweight virtual execution environment for centralized AI agents.
 
-## Status
+Agent Virtual Runtime is a Java 11+ framework that gives an AI agent a virtual world—files, commands, skills, artifacts and other agents—without provisioning a container or VM for every run. AVR owns a model-neutral agent loop while applications retain control over identity, tenancy, workspace naming and storage topology.
 
-AVR is in early development (`0.x`). APIs may change between minor releases.
+## V1.0 features
 
-The first vertical slice currently includes:
+- synchronous and asynchronous agent execution;
+- model-neutral agent loop with native tool calling and JSON Schema definitions;
+- concurrent execution of independent tool calls with deterministic result ordering;
+- sequential barriers for workspace mutations, configurable tool timeout and no-progress fuse;
+- immutable execution context and pluggable authorization policy;
+- run lifecycle events for logging, streaming and observability;
+- request-scoped Skill instruction injection and a Skill registry;
+- memory, host-disk and generic object-store-backed virtual workspaces;
+- file read, write, list, copy, move and delete operations;
+- virtual `pwd`, `ls`, `cat`, `grep`, `wc` and policy-controlled `curl` commands with no OS process execution;
+- immutable HTML/CSS/JS artifact snapshots with a declared entrypoint, persistent metadata on disk and object storage, and HTTP preview;
+- named sub-agent delegation over a shared virtual workspace;
+- cooperative cancellation for synchronous and asynchronous runs;
+- embeddable HTTP transport with application-defined workspace resolution.
 
-- a model-neutral agent loop;
-- structured capability calls;
-- an in-memory virtual workspace;
-- `file.read` and `file.write` capabilities;
-- immutable artifact snapshots;
-- a deterministic scripted model for tests and examples.
+AVR is not a kernel sandbox and does not execute arbitrary binaries. Network access, databases, Git, object storage and business APIs should be supplied as explicit tools with policy checks.
 
-AVR does **not** execute arbitrary binaries and does not provide kernel-level sandboxing.
-
-## Requirements
+## Requirements and build
 
 - JDK 11 or later
 - Maven 3.6 or later
 
-## Build
-
 ```bash
-mvn verify
+mvn clean verify
 ```
+
+## Minimal integration
+
+```java
+Workspace workspace = new MemoryWorkspace("any-id-chosen-by-your-application");
+
+ToolRegistry tools = DefaultToolRegistry.builder()
+        .register(new ReadFileTool())
+        .register(new WriteFileTool())
+        .register(new ListFilesTool())
+        .register(new CommitArtifactTool())
+        .register(new VirtualCommandTool())
+        .build();
+
+AgentRuntime runtime = new AgentLoop(llm, tools);
+
+Agent agent = Agent.builder()
+        .name("report-agent")
+        .runtime(runtime)
+        .workspace(workspace)
+        .skill(new Skill("report-writing", "Write evidence-based HTML reports.",
+                Collections.singletonList("file.write")))
+        .observer(event -> metrics.record(event.getType()))
+        .build());
+
+AgentResult result = agent.input("Read /inputs/data.txt and create /report/index.html");
+```
+
+`Llm` represents one model call. Map tool definitions to the provider's tool/function schema and map its response back to `LlmResponse` and `ToolCall`; `AgentLoop` performs the callback loop. Use `runtime.runAsync(request)` for a `CompletionStage`.
+
+## OpenAI-compatible model
+
+The `avr-model-openai` module implements the Chat Completions protocol, including SSE streaming, function tools, assistant `tool_calls`, and tool-result messages:
+
+```java
+OpenAiConfig modelConfig = OpenAiConfig.builder()
+        .apiUrl("https://api.openai.com/v1")
+        .apiKey(System.getenv("OPENAI_API_KEY"))
+        .model("your-model-name")
+        .temperature(0.1)
+        .maxTokens(4096)
+        .stream(true)
+        .timeout(Duration.ofMinutes(2))
+        .build();
+
+Llm llm = new OpenAiLlm(modelConfig);
+AgentRuntime runtime = new AgentLoop(llm, tools);
+```
+
+`apiUrl` may be either a base URL such as `https://api.openai.com/v1` or a complete `/chat/completions` endpoint. Streaming is enabled by default; `OpenAiLlm` consumes the model's SSE response, emits text deltas as `model.delta` run events, and assembles fragmented function calls by their tool-call index. Use `stream(false)` for a JSON response. Compatible services can add headers through `header(name, value)`. The API key is optional so local services can be used without authentication.
+
+### Tool-use flow
+
+1. AVR converts every `ToolDefinition` to an OpenAI function tool.
+2. The model returns one or more `tool_calls` containing call ID, name and JSON arguments.
+3. AVR stores the assistant message and its original tool calls in conversation history.
+4. Adjacent `PARALLEL` tools run on the configured executor; `SEQUENTIAL` tools form barriers.
+5. Every result is appended as a `tool` message with the matching `tool_call_id`, in original call order.
+6. AVR calls the model again until it returns a final answer or a loop guard stops the run.
+
+When one model turn contains multiple tool calls, AVR executes adjacent `PARALLEL` tools concurrently and always appends their results to model history in the original call order. Tools that mutate ordered state declare `SEQUENTIAL` and act as barriers. Configure the executor, timeout, empty-response retry and no-progress fuse through `AgentLoopOptions`.
+
+For cancellation, create a `CancellationSource`, pass its token to the Agent builder, and call `cancel()` from the hosting application. The loop checks cancellation before model and tool calls.
+
+## Workspace isolation
+
+AVR never assumes that a workspace maps to a user. The hosting application may resolve workspace IDs as `business/line/user/workspace`, a hash, a job ID, or any other scheme. Isolation is established by passing each request the correct `Workspace` and `ExecutionContext`, then enforcing application rules through `ToolPolicy`.
+
+`Workspace` is the single virtual-file-system contract. The lightweight built-in implementations are shipped together in `avr-storage` and the `com.avr.storage` package:
+
+```java
+Workspace memory = new MemoryWorkspace("temporary-run");
+Workspace disk = new DiskWorkspace("opaque-id", Paths.get("/mounted/avr/work-42"));
+```
+
+For centralized deployments, use `MemoryWorkspaceProvider` or `DiskWorkspaceProvider`, or implement the business-neutral `WorkspaceProvider` SPI. The disk provider accepts an application-owned path resolver, so AVR does not define any user or tenant directory scheme.
+
+Applications can implement `Workspace` directly with an internal storage client. `ObjectWorkspace` is an optional convenience implementation backed by the small `ObjectStore` adapter; it does not require or impose an S3, OSS, COS or MinIO SDK.
+
+`MemoryWorkspace` retains files and artifacts only for the lifetime of that Java object. `DiskWorkspace` persists both files and committed artifact snapshots below its configured root, while `ObjectWorkspace` persists them below its configured object-key prefix. Recreating a persistent Workspace with the same root or prefix restores `artifacts()`. The internal `/.avr` namespace is reserved for AVR metadata and is never exposed to the agent.
+
+The optional `curl` virtual command only works when `VirtualCommandTool` receives a `VirtualHttpClient`. This lets the application enforce host allowlists, credentials, timeouts and audit rules without exposing the host shell.
+
+## HTTP embedding
+
+`AgentRuntimeHttpServer` exposes:
+
+- `GET /health`
+- `POST /v1/runs` with a JSON body containing `prompt`, and optional `workspace`, `agent` and `maxSteps`
+- `POST /v1/runs/async` to start a background run
+- `GET /v1/runs/{runId}/events` for SSE event replay, live events and heartbeat
+- `GET /v1/artifacts/{artifactId}/{relativePath}` for HTML, CSS, JavaScript and text previews
+
+Plain UTF-8 prompt bodies remain supported. The application supplies `WorkspaceResolver`, so the transport does not impose an identity convention. Production deployments should add authentication and quotas at the application boundary; request bodies are limited to 1 MiB by default.
+
+## Modules
+
+- `avr-api`: public contracts and SPIs.
+- `avr-core`: agent loop, tool registry and built-in tools.
+- `avr-storage`: all built-in Workspace implementations in one dependency and package.
+- `avr-command`: safe virtual command vocabulary.
+- `avr-model-openai`: OpenAI-compatible Chat Completions client with native tool calling.
+- `avr-spring-boot-starter`: Spring Boot configuration binding and Agent auto-configuration.
+- `avr-server`: embeddable JDK HTTP transport.
+- `avr-examples`: runnable end-to-end example.
 
 ## Run the example
 
 ```bash
-mvn -pl avr-examples -am package
-java -cp avr-examples/target/avr-examples-0.1.0-SNAPSHOT.jar:avr-core/target/avr-core-0.1.0-SNAPSHOT.jar:avr-api/target/avr-api-0.1.0-SNAPSHOT.jar:avr-storage-memory/target/avr-storage-memory-0.1.0-SNAPSHOT.jar org.agentvirtualruntime.examples.ReportAgentExample
+export OPENAI_API_KEY="your-api-key"
+export AVR_MODEL="gpt-4.1-mini"
+mvn -pl avr-examples -am clean install
+mvn -pl avr-examples exec:java
 ```
 
-## Minimal API
+The runnable examples build a stock-analysis agent with a real OpenAI-compatible model, financial-analysis Skill, disk Workspace, streamed Function Calls, and a committed `report.html`. They demonstrate both Spring-injected and plain Java initialization. See [avr-examples/README.md](avr-examples/README.md) for configuration and output details.
 
-```java
-AgentRuntime runtime = new DefaultAgentRuntime(modelGateway, capabilityRegistry);
+Contributions use Gitmoji Conventional Commit subjects, for example `✨ feat: add an object-storage workspace`. See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
-AgentResult result = runtime.run(AgentRequest.builder()
-        .workspace(workspace)
-        .prompt("Read /inputs/data.txt and write a report")
-        .build());
-```
+完整的 Java、Maven、模型 SSE、Function Call、Tool、Workspace 和 HTTP 接入方式请参阅 [INTEGRATION.md](INTEGRATION.md)。
 
-## Modules
-
-- `avr-api`: stable public contracts and SPIs.
-- `avr-core`: default agent loop and capability routing.
-- `avr-storage-memory`: in-memory workspace implementation.
-- `avr-examples`: runnable examples.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md). By participating, you agree to follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
-
-## Security
-
-Please do not report vulnerabilities in public issues. See [SECURITY.md](SECURITY.md).
-
-## License
-
-Apache License 2.0. See [LICENSE](LICENSE).
-
+Licensed under the Apache License 2.0. See [LICENSE](LICENSE).

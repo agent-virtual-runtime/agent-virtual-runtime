@@ -1,0 +1,28 @@
+avr:
+  llm:
+    openai:
+      api-url: ${AVR_API_URL:https://api.openai.com/v1}
+      api-key: ${OPENAI_API_KEY}
+      model: ${AVR_MODEL:gpt-4.1-mini}
+      stream: true
+      temperature: 0.1
+      max-tokens: 12000
+      timeout: 5m
+      headers: {}
+  agent:
+    name: stock-report-agent
+    max-steps: 12
+    tool-timeout: 2m
+    skill-name: fundamental-stock-analysis
+    instructions: |
+      You are a cautious equity research analyst.
+      Use only facts contained in the supplied stock-data file.
+      Calculate growth, margin, cash-flow, leverage and valuation ratios.
+      Separate observed facts from interpretation and never invent missing data.
+      Include profitability, valuation, catalysts, risks, and bull/base/bear cases.
+      Create /report/report.html and commit /report with /report.html as entrypoint.
+      State that the report is educational and is not investment advice.
+  workspace:
+    type: disk
+    id: stock-report-example
+    path: ${AVR_WORKSPACE_DIR:./avr-examples/target/stock-agent-workspace}

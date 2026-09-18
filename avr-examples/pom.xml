@@ -5,20 +5,38 @@
     <parent>
         <groupId>org.agentvirtualruntime</groupId>
         <artifactId>avr-parent</artifactId>
-        <version>0.1.0-SNAPSHOT</version>
+        <version>1.0.0</version>
     </parent>
     <artifactId>avr-examples</artifactId>
     <name>AVR Examples</name>
     <dependencies>
         <dependency>
             <groupId>org.agentvirtualruntime</groupId>
-            <artifactId>avr-core</artifactId>
+            <artifactId>avr-spring-boot-starter</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
-            <groupId>org.agentvirtualruntime</groupId>
-            <artifactId>avr-storage-memory</artifactId>
-            <version>${project.version}</version>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+            <version>${spring-boot.version}</version>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <configuration>
+                    <mainClass>com.avr.examples.StockReportAgentExample</mainClass>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>${spring-boot.version}</version>
+            </plugin>
+        </plugins>
+    </build>
 </project>

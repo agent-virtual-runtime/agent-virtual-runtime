@@ -1,0 +1,12 @@
+avr:
+  llm:
+    openai:
+      api-url: ${test.api.url:https://fallback.example/v1}
+      api-key: ${test.api.key}
+      model: ${test.model:test-model}
+      stream: false
+      temperature: 0.25
+      max-tokens: 2048
+      timeout: 90s
+      headers:
+        X-Test-Tenant: ${test.tenant:default-tenant}

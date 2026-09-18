@@ -6,7 +6,7 @@
 
     <groupId>org.agentvirtualruntime</groupId>
     <artifactId>avr-parent</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>1.0.0</version>
     <packaging>pom</packaging>
 
     <name>Agent Virtual Runtime</name>
@@ -24,7 +24,11 @@
     <modules>
         <module>avr-api</module>
         <module>avr-core</module>
-        <module>avr-storage-memory</module>
+        <module>avr-storage</module>
+        <module>avr-command</module>
+        <module>avr-model-openai</module>
+        <module>avr-spring-boot-starter</module>
+        <module>avr-server</module>
         <module>avr-examples</module>
     </modules>
 
@@ -34,10 +38,19 @@
         <junit.version>5.11.4</junit.version>
         <maven.compiler.version>3.11.0</maven.compiler.version>
         <maven.surefire.version>3.2.5</maven.surefire.version>
+        <jackson.version>2.17.3</jackson.version>
+        <spring-boot.version>2.7.18</spring-boot.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>${jackson.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>org.junit</groupId>
                 <artifactId>junit-bom</artifactId>
