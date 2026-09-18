@@ -43,7 +43,7 @@ mvn clean verify
 
 ```xml
 <dependency>
-    <groupId>org.agentvirtualruntime</groupId>
+    <groupId>io.github.agent-virtual-runtime</groupId>
     <artifactId>avr-spring-boot-starter</artifactId>
     <version>1.0.0</version>
 </dependency>

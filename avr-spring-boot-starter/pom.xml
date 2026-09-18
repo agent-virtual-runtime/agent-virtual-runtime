@@ -4,7 +4,7 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <parent>
-        <groupId>org.agentvirtualruntime</groupId>
+        <groupId>io.github.agent-virtual-runtime</groupId>
         <artifactId>avr-parent</artifactId>
         <version>1.0.0</version>
     </parent>
@@ -36,22 +36,22 @@
 
     <dependencies>
         <dependency>
-            <groupId>org.agentvirtualruntime</groupId>
+            <groupId>io.github.agent-virtual-runtime</groupId>
             <artifactId>avr-core</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
-            <groupId>org.agentvirtualruntime</groupId>
+            <groupId>io.github.agent-virtual-runtime</groupId>
             <artifactId>avr-model-openai</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
-            <groupId>org.agentvirtualruntime</groupId>
+            <groupId>io.github.agent-virtual-runtime</groupId>
             <artifactId>avr-storage</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
-            <groupId>org.agentvirtualruntime</groupId>
+            <groupId>io.github.agent-virtual-runtime</groupId>
             <artifactId>avr-command</artifactId>
             <version>${project.version}</version>
         </dependency>

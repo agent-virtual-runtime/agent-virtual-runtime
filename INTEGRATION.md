@@ -13,17 +13,17 @@ AVR 按能力拆分模块。发布到 Maven 仓库后，通常至少引入 Core�
 
 <dependencies>
     <dependency>
-        <groupId>org.agentvirtualruntime</groupId>
+        <groupId>io.github.agent-virtual-runtime</groupId>
         <artifactId>avr-core</artifactId>
         <version>${avr.version}</version>
     </dependency>
     <dependency>
-        <groupId>org.agentvirtualruntime</groupId>
+        <groupId>io.github.agent-virtual-runtime</groupId>
         <artifactId>avr-storage</artifactId>
         <version>${avr.version}</version>
     </dependency>
     <dependency>
-        <groupId>org.agentvirtualruntime</groupId>
+        <groupId>io.github.agent-virtual-runtime</groupId>
         <artifactId>avr-model-openai</artifactId>
         <version>${avr.version}</version>
     </dependency>
