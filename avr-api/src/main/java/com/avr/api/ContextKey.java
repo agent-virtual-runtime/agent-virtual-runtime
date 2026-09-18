@@ -1,8 +1,11 @@
 package com.avr.api;
 
+import lombok.Getter;
+
 import java.util.Objects;
 
 /** 用于在 {@link ExecutionContext} 中安全存取值的类型化键。 */
+@Getter
 public final class ContextKey<T> {
     private final String name;
     private final Class<T> type;
@@ -14,14 +17,6 @@ public final class ContextKey<T> {
 
     public static <T> ContextKey<T> of(String name, Class<T> type) {
         return new ContextKey<T>(name, type);
-    }
-
-    public String getName() {
-        return name;
-    }
-
-    public Class<T> getType() {
-        return type;
     }
 
     @Override

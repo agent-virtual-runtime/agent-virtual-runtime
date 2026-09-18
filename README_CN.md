@@ -13,15 +13,15 @@ Agent Virtual Runtime 是一个兼容 Java 11 及以上版本的 Agent Runtime �
 - 同一轮独立 Tool 并发执行，并按原始调用顺序回填结果；
 - Workspace 写操作串行屏障、Tool 超时和无进展熔断；
 - 不可变执行上下文和可替换的授权策略；
-- 用于日志、SSE 和可观测性的运行生命周期事件；
+- 用于日志、SSE 和可观测性的非侵入 Runtime 事件监听；
 - 请求级 Skill 注入和 Skill 注册；
 - 内存、宿主机磁盘和对象存储 Workspace；
 - 文件读取、写入、查看、复制、移动和删除；
 - 不启动宿主机进程的虚拟 `pwd`、`ls`、`cat`、`grep`、`wc` 和策略控制的 `curl`；
-- 具有明确入口文件、磁盘与对象存储持久化元数据的 HTML/CSS/JS Artifact 快照和 HTTP 预览；
+- 具有明确入口文件、磁盘与对象存储持久化元数据的 HTML/CSS/JS Artifact 快照；
 - 共享虚拟 Workspace 的具名子 Agent 委派；
 - 同步和异步任务的协作式取消；
-- 由应用决定 Workspace 解析规则的嵌入式 HTTP 服务；
+- 可选、有容量上限的运行状态与事件内存投影；
 - Spring Boot YAML 配置绑定和 Agent 自动装配。
 
 AVR 不是内核沙箱，也不执行任意二进制程序。网络、数据库、Git、对象存储和业务 API 应作为具有明确参数和权限检查的 Tool 接入。
@@ -30,6 +30,8 @@ AVR 不是内核沙箱，也不执行任意二进制程序。网络、数据库�
 
 - JDK 11 或更高版本
 - Maven 3.6 或更高版本
+
+项目使用 Lombok 精简 Getter/Setter，依赖范围为 `provided`，不会成为 AVR 的运行时依赖。通过 Maven 构建无需额外操作；IDE 中需要启用注解处理。
 
 ```bash
 mvn clean verify
@@ -182,17 +184,26 @@ Workspace disk = new DiskWorkspace(
 
 可选的虚拟 `curl` 只有在 `VirtualCommandTool` 收到 `VirtualHttpClient` 时才可使用。应用可以通过它实现域名白名单、认证、超时和审计，而不暴露宿主机 Shell。
 
-## HTTP 接入
+## 非侵入式运行观测
 
-`AgentRuntimeHttpServer` 提供：
+AVR 不启动独立 HTTP Server，也不在 `Agent` 上增加状态查询或监听方法。监听器注册在 Runtime 层：非 Spring 应用在创建 `AgentLoop` 时传入 `RuntimeEventListener`，Spring Boot 应用只需声明监听器 Bean，Starter 会自动收集。
 
-- `GET /health`
-- `POST /v1/runs`：同步运行
-- `POST /v1/runs/async`：启动后台任务
-- `GET /v1/runs/{runId}/events`：SSE 历史回放、实时事件和心跳
-- `GET /v1/artifacts/{artifactId}/{relativePath}`：HTML、CSS、JavaScript 和文本预览
+```java
+RuntimeEventListener listener = event ->
+        System.out.println(event.getRunId()
+                + " " + event.getType());
 
-应用通过 `WorkspaceResolver` 决定请求对应哪个 Workspace。生产环境应在应用边界增加认证、授权和配额控制。
+AgentRuntime runtime = new AgentLoop(
+        llm,
+        tools,
+        ToolPolicy.allowAll(),
+        AgentLoopOptions.defaults(),
+        Collections.singletonList(listener));
+```
+
+事件包含 `runId`、Agent 名称、Workspace ID、有序序号、状态、类型、说明和结构化属性。监听器异常不会改变 Agent 的执行结果。开发者可以自行把事件写入日志、指标、OpenTelemetry、数据库、MQ，或者转换为 SSE 和 WebSocket。
+
+`InMemoryRunTracker` 是可选的有界内存投影，可查询 `RunSnapshot`、运行中的任务以及有限的历史事件。它不会自动启用；需要持久化时，应自行实现 `RuntimeEventListener`。HTTP Controller、认证、配额以及 Artifact 文件响应均由宿主应用负责。
 
 ## 模块
 
@@ -201,8 +212,7 @@ Workspace disk = new DiskWorkspace(
 - `avr-storage`：在一个依赖和包中提供全部内置 Workspace 实现；
 - `avr-command`：安全虚拟命令；
 - `avr-model-openai`：OpenAI 兼容模型、SSE 和原生 Tool Calling；
-- `avr-spring-boot-starter`：Spring Boot 配置绑定和 Agent 自动装配；
-- `avr-server`：嵌入式 JDK HTTP 服务；
+- `avr-spring-boot-starter`：Spring Boot 配置绑定、监听器发现和 Agent 自动装配；
 - `avr-examples`：可运行的端到端示例。
 
 ## 运行股票分析示例

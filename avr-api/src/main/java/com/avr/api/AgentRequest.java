@@ -1,8 +1,11 @@
 package com.avr.api;
 
+import lombok.Getter;
+
 import java.util.Objects;
 
 /** 一次智能体运行所需的不可变输入。 */
+@Getter
 public final class AgentRequest {
     private final String prompt;
     private final String runId;
@@ -10,7 +13,6 @@ public final class AgentRequest {
     private final int maxSteps;
     private final String agent;
     private final ExecutionContext context;
-    private final RunObserver observer;
     private final java.util.List<Skill> skills;
     private final CancellationToken cancellationToken;
 
@@ -21,7 +23,6 @@ public final class AgentRequest {
         this.maxSteps = builder.maxSteps;
         this.agent = builder.agent;
         this.context = builder.context;
-        this.observer = builder.observer;
         this.skills = java.util.Collections.unmodifiableList(new java.util.ArrayList<Skill>(builder.skills));
         this.cancellationToken = builder.cancellationToken;
         if (prompt.trim().isEmpty()) {
@@ -37,42 +38,6 @@ public final class AgentRequest {
         return new Builder();
     }
 
-    public String getPrompt() {
-        return prompt;
-    }
-
-    public String getRunId() {
-        return runId;
-    }
-
-    public Workspace getWorkspace() {
-        return workspace;
-    }
-
-    public int getMaxSteps() {
-        return maxSteps;
-    }
-
-    public String getAgent() {
-        return agent;
-    }
-
-    public ExecutionContext getContext() {
-        return context;
-    }
-
-    public RunObserver getObserver() {
-        return observer;
-    }
-
-    public java.util.List<Skill> getSkills() {
-        return skills;
-    }
-
-    public CancellationToken getCancellationToken() {
-        return cancellationToken;
-    }
-
     /** 构建 {@link AgentRequest}。 */
     public static final class Builder {
         private String prompt;
@@ -81,7 +46,6 @@ public final class AgentRequest {
         private int maxSteps = 20;
         private String agent = "default";
         private ExecutionContext context = ExecutionContext.empty();
-        private RunObserver observer = RunObserver.noop();
         private final java.util.List<Skill> skills = new java.util.ArrayList<Skill>();
         private CancellationToken cancellationToken = CancellationToken.none();
 
@@ -112,11 +76,6 @@ public final class AgentRequest {
 
         public Builder context(ExecutionContext context) {
             this.context = Objects.requireNonNull(context, "context");
-            return this;
-        }
-
-        public Builder observer(RunObserver observer) {
-            this.observer = Objects.requireNonNull(observer, "observer");
             return this;
         }
 

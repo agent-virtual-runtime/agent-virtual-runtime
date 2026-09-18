@@ -6,7 +6,9 @@ import com.avr.api.AgentRuntime;
 import com.avr.api.Llm;
 import com.avr.api.LlmResponse;
 import com.avr.api.Message;
-import com.avr.api.RunEvent;
+import com.avr.api.RuntimeEvent;
+import com.avr.api.RuntimeEventListener;
+import com.avr.api.RuntimeEventTypes;
 import com.avr.api.RunState;
 import com.avr.api.Skill;
 import com.avr.api.Tool;
@@ -18,16 +20,22 @@ import com.avr.api.ToolRegistry;
 import com.avr.api.ToolResult;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /** 默认的模型调用、工具执行和结果回填循环。 */
 public final class AgentLoop implements AgentRuntime {
+    private static final Logger LOGGER = Logger.getLogger(AgentLoop.class.getName());
     private static final String SYSTEM_PROMPT =
             "You are running inside Agent Virtual Runtime. "
                     + "Use only the tools provided by the runtime.";
@@ -36,6 +44,7 @@ public final class AgentLoop implements AgentRuntime {
     private final ToolRegistry tools;
     private final ToolPolicy policy;
     private final AgentLoopOptions options;
+    private final List<RuntimeEventListener> eventListeners;
 
     public AgentLoop(Llm llm, ToolRegistry tools) {
         this(llm, tools, ToolPolicy.allowAll(), AgentLoopOptions.defaults());
@@ -53,10 +62,28 @@ public final class AgentLoop implements AgentRuntime {
             ToolRegistry tools,
             ToolPolicy policy,
             AgentLoopOptions options) {
+        this(llm, tools, policy, options,
+                Collections.<RuntimeEventListener>emptyList());
+    }
+
+    /** 使用 Runtime 级监听器创建 Agent Loop。 */
+    public AgentLoop(
+            Llm llm,
+            ToolRegistry tools,
+            ToolPolicy policy,
+            AgentLoopOptions options,
+            Collection<? extends RuntimeEventListener> eventListeners) {
         this.llm = Objects.requireNonNull(llm, "llm");
         this.tools = Objects.requireNonNull(tools, "tools");
         this.policy = Objects.requireNonNull(policy, "policy");
         this.options = Objects.requireNonNull(options, "options");
+        Objects.requireNonNull(eventListeners, "eventListeners");
+        List<RuntimeEventListener> listeners =
+                new ArrayList<RuntimeEventListener>(eventListeners);
+        for (RuntimeEventListener listener : listeners) {
+            Objects.requireNonNull(listener, "eventListener");
+        }
+        this.eventListeners = Collections.unmodifiableList(listeners);
     }
 
     @Override
@@ -64,8 +91,10 @@ public final class AgentLoop implements AgentRuntime {
         Objects.requireNonNull(request, "request");
         String runId = request.getRunId();
         AtomicLong sequence = new AtomicLong();
-        emit(request, runId, sequence, RunState.CREATED, "run.created", request.getAgent());
-        emit(request, runId, sequence, RunState.PREPARING, "run.preparing",
+        emit(request, runId, sequence, RunState.CREATED,
+                RuntimeEventTypes.RUN_CREATED, request.getAgent());
+        emit(request, runId, sequence, RunState.PREPARING,
+                RuntimeEventTypes.RUN_PREPARING,
                 request.getWorkspace().id());
 
         List<Message> messages = new ArrayList<Message>();
@@ -83,12 +112,20 @@ public final class AgentLoop implements AgentRuntime {
                 }
 
                 emit(request, runId, sequence, RunState.CALLING_MODEL,
-                        "model.call", String.valueOf(step));
+                        RuntimeEventTypes.MODEL_CALL, String.valueOf(step));
+                long modelStartedAt = System.nanoTime();
                 LlmResponse response = llm.chat(
                         messages,
                         tools.definitions(),
                         delta -> emit(request, runId, sequence, RunState.CALLING_MODEL,
-                                "model.delta", delta));
+                                RuntimeEventTypes.MODEL_DELTA, delta));
+                emit(request, runId, sequence, RunState.CALLING_MODEL,
+                        RuntimeEventTypes.MODEL_COMPLETED,
+                        response.getText(), attributes(
+                                "step", step,
+                                "durationMillis", elapsedMillis(modelStartedAt),
+                                "toolCallCount", response.getToolCalls().size(),
+                                "truncated", response.isTruncated()));
 
                 if (response.isTruncated()) {
                     throw new IllegalStateException(
@@ -101,7 +138,8 @@ public final class AgentLoop implements AgentRuntime {
                         emptyResponses++;
                         noProgressRounds++;
                         emit(request, runId, sequence, RunState.CALLING_MODEL,
-                                "model.empty_retry", String.valueOf(emptyResponses));
+                                RuntimeEventTypes.MODEL_EMPTY_RETRY,
+                                String.valueOf(emptyResponses));
                         checkProgressFuse(noProgressRounds);
                         continue;
                     }
@@ -110,7 +148,8 @@ public final class AgentLoop implements AgentRuntime {
                     }
                     messages.add(Message.assistant(response.getText()));
                     emit(request, runId, sequence, RunState.COMPLETED,
-                            "run.completed", response.getText());
+                            RuntimeEventTypes.RUN_COMPLETED,
+                            response.getText());
                     return new AgentResult(runId, RunState.COMPLETED, response.getText(), step,
                             request.getWorkspace().artifacts());
                 }
@@ -133,7 +172,7 @@ public final class AgentLoop implements AgentRuntime {
             throw new IllegalStateException("agent exceeded maxSteps=" + request.getMaxSteps());
         } catch (RuntimeException exception) {
             emit(request, runId, sequence, RunState.FAILED,
-                    "run.failed", exception.getMessage());
+                    RuntimeEventTypes.RUN_FAILED, exception.getMessage());
             throw exception;
         }
     }
@@ -158,10 +197,13 @@ public final class AgentLoop implements AgentRuntime {
                 results.set(index, executeOne(call, request, runId, sequence));
             } else {
                 emit(request, runId, sequence, RunState.EXECUTING_TOOLS,
-                        "tool.started", call.getName());
+                        RuntimeEventTypes.TOOL_STARTED,
+                        call.getName(), toolAttributes(call));
+                long startedAt = System.nanoTime();
                 Future<ToolResult> future = options.getToolExecutor()
                         .submit(() -> execute(call, request));
-                parallelBatch.add(new PendingCall(index, call, future));
+                parallelBatch.add(new PendingCall(
+                        index, call, future, startedAt));
             }
         }
         completeBatch(parallelBatch, results, request, runId, sequence);
@@ -174,7 +216,9 @@ public final class AgentLoop implements AgentRuntime {
             String runId,
             AtomicLong sequence) {
         emit(request, runId, sequence, RunState.EXECUTING_TOOLS,
-                "tool.started", call.getName());
+                RuntimeEventTypes.TOOL_STARTED,
+                call.getName(), toolAttributes(call));
+        long startedAt = System.nanoTime();
         Future<ToolResult> future = options.getToolExecutor()
                 .submit(() -> execute(call, request));
         ToolResult result;
@@ -194,7 +238,7 @@ public final class AgentLoop implements AgentRuntime {
             result = ToolResult.failure(
                     "ERROR ExecutionException: " + rootMessage(exception));
         }
-        emitToolResult(request, runId, sequence, call, result);
+        emitToolResult(request, runId, sequence, call, result, startedAt);
         return result;
     }
 
@@ -227,7 +271,8 @@ public final class AgentLoop implements AgentRuntime {
                         "ERROR ExecutionException: " + rootMessage(exception));
             }
             results.set(pending.index, result);
-            emitToolResult(request, runId, sequence, pending.call, result);
+            emitToolResult(request, runId, sequence, pending.call, result,
+                    pending.startedAt);
         }
     }
 
@@ -257,10 +302,17 @@ public final class AgentLoop implements AgentRuntime {
             String runId,
             AtomicLong sequence,
             ToolCall call,
-            ToolResult result) {
+            ToolResult result,
+            long startedAt) {
         emit(request, runId, sequence, RunState.EXECUTING_TOOLS,
-                result.isSuccess() ? "tool.completed" : "tool.failed",
-                call.getName());
+                result.isSuccess()
+                        ? RuntimeEventTypes.TOOL_COMPLETED
+                        : RuntimeEventTypes.TOOL_FAILED,
+                call.getName(), attributes(
+                        "toolCallId", call.getId(),
+                        "toolName", call.getName(),
+                        "success", result.isSuccess(),
+                        "durationMillis", elapsedMillis(startedAt)));
     }
 
     private AgentResult cancelled(
@@ -272,7 +324,8 @@ public final class AgentLoop implements AgentRuntime {
         if (!request.getCancellationToken().isCancelled()) {
             return null;
         }
-        emit(request, runId, sequence, RunState.CANCELLED, "run.cancelled", detail);
+        emit(request, runId, sequence, RunState.CANCELLED,
+                RuntimeEventTypes.RUN_CANCELLED, detail);
         return new AgentResult(runId, RunState.CANCELLED, "", steps,
                 request.getWorkspace().artifacts());
     }
@@ -301,30 +354,82 @@ public final class AgentLoop implements AgentRuntime {
         return prompt.toString();
     }
 
-    private static void emit(
+    private void emit(
             AgentRequest request,
             String runId,
             AtomicLong sequence,
             RunState state,
             String type,
             String detail) {
-        request.getObserver().onEvent(new RunEvent(
-                runId, sequence.incrementAndGet(), state, type,
-                detail == null ? "" : detail));
+        emit(request, runId, sequence, state, type, detail,
+                Collections.<String, Object>emptyMap());
+    }
+
+    private void emit(
+            AgentRequest request,
+            String runId,
+            AtomicLong sequence,
+            RunState state,
+            String type,
+            String detail,
+            Map<String, Object> attributes) {
+        RuntimeEvent event = new RuntimeEvent(
+                runId,
+                request.getAgent(),
+                request.getWorkspace().id(),
+                sequence.incrementAndGet(),
+                state,
+                type,
+                detail,
+                attributes);
+        for (RuntimeEventListener listener : eventListeners) {
+            try {
+                listener.onEvent(event);
+            } catch (RuntimeException exception) {
+                // 可观测代码不能改变 Agent 的执行结果。
+                LOGGER.log(Level.WARNING,
+                        "Runtime event listener failed: {0}: {1}",
+                        new Object[]{
+                                listener.getClass().getName(),
+                                exception.getMessage()
+                        });
+            }
+        }
+    }
+
+    private static Map<String, Object> toolAttributes(ToolCall call) {
+        return attributes(
+                "toolCallId", call.getId(),
+                "toolName", call.getName());
+    }
+
+    private static Map<String, Object> attributes(Object... values) {
+        Map<String, Object> attributes = new LinkedHashMap<String, Object>();
+        for (int index = 0; index < values.length; index += 2) {
+            attributes.put(String.valueOf(values[index]), values[index + 1]);
+        }
+        return attributes;
+    }
+
+    private static long elapsedMillis(long startedAt) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
     }
 
     private static final class PendingCall {
         private final int index;
         private final ToolCall call;
         private final Future<ToolResult> future;
+        private final long startedAt;
 
         private PendingCall(
                 int index,
                 ToolCall call,
-                Future<ToolResult> future) {
+                Future<ToolResult> future,
+                long startedAt) {
             this.index = index;
             this.call = call;
             this.future = future;
+            this.startedAt = startedAt;
         }
     }
 }

@@ -1,11 +1,15 @@
 package com.avr.spring;
 
+import lombok.Getter;
+import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
 
 /** 默认 Agent 和循环配置。 */
 @ConfigurationProperties(prefix = "avr.agent")
+@Getter
+@Setter
 public class AvrAgentProperties {
     /** Agent 名称。 */
     private String name = "default";
@@ -22,59 +26,4 @@ public class AvrAgentProperties {
     /** 注入默认 Skill 的业务指令。 */
     private String instructions;
 
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public int getMaxSteps() {
-        return maxSteps;
-    }
-
-    public void setMaxSteps(int maxSteps) {
-        this.maxSteps = maxSteps;
-    }
-
-    public Duration getToolTimeout() {
-        return toolTimeout;
-    }
-
-    public void setToolTimeout(Duration toolTimeout) {
-        this.toolTimeout = toolTimeout;
-    }
-
-    public int getMaxEmptyResponses() {
-        return maxEmptyResponses;
-    }
-
-    public void setMaxEmptyResponses(int maxEmptyResponses) {
-        this.maxEmptyResponses = maxEmptyResponses;
-    }
-
-    public int getMaxNoProgressRounds() {
-        return maxNoProgressRounds;
-    }
-
-    public void setMaxNoProgressRounds(int maxNoProgressRounds) {
-        this.maxNoProgressRounds = maxNoProgressRounds;
-    }
-
-    public String getSkillName() {
-        return skillName;
-    }
-
-    public void setSkillName(String skillName) {
-        this.skillName = skillName;
-    }
-
-    public String getInstructions() {
-        return instructions;
-    }
-
-    public void setInstructions(String instructions) {
-        this.instructions = instructions;
-    }
 }

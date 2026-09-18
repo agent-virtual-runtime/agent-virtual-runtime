@@ -1,10 +1,13 @@
 package com.avr.api;
 
+import lombok.Getter;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 /** 单次模型调用返回的文本、工具调用和结束原因。 */
+@Getter
 public final class LlmResponse {
     private final String text;
     private final List<ToolCall> toolCalls;
@@ -37,18 +40,6 @@ public final class LlmResponse {
             List<ToolCall> calls,
             String finishReason) {
         return new LlmResponse(text, calls, finishReason);
-    }
-
-    public String getText() {
-        return text;
-    }
-
-    public List<ToolCall> getToolCalls() {
-        return toolCalls;
-    }
-
-    public String getFinishReason() {
-        return finishReason;
     }
 
     public boolean isTruncated() {

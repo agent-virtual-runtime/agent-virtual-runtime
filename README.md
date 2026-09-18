@@ -13,15 +13,15 @@ Agent Virtual Runtime is a Java 11+ framework that gives an AI agent a virtual w
 - concurrent execution of independent tool calls with deterministic result ordering;
 - sequential barriers for workspace mutations, configurable tool timeout and no-progress fuse;
 - immutable execution context and pluggable authorization policy;
-- run lifecycle events for logging, streaming and observability;
+- non-invasive Runtime event listeners for logging, streaming and observability;
 - request-scoped Skill instruction injection and a Skill registry;
 - memory, host-disk and generic object-store-backed virtual workspaces;
 - file read, write, list, copy, move and delete operations;
 - virtual `pwd`, `ls`, `cat`, `grep`, `wc` and policy-controlled `curl` commands with no OS process execution;
-- immutable HTML/CSS/JS artifact snapshots with a declared entrypoint, persistent metadata on disk and object storage, and HTTP preview;
+- immutable HTML/CSS/JS artifact snapshots with a declared entrypoint and persistent metadata on disk and object storage;
 - named sub-agent delegation over a shared virtual workspace;
 - cooperative cancellation for synchronous and asynchronous runs;
-- embeddable HTTP transport with application-defined workspace resolution.
+- optional bounded in-memory projection for run status and event queries.
 
 AVR is not a kernel sandbox and does not execute arbitrary binaries. Network access, databases, Git, object storage and business APIs should be supplied as explicit tools with policy checks.
 
@@ -29,6 +29,8 @@ AVR is not a kernel sandbox and does not execute arbitrary binaries. Network acc
 
 - JDK 11 or later
 - Maven 3.6 or later
+
+The source uses Lombok for boilerplate accessors. Lombok is configured with `provided` scope and is not an AVR runtime dependency. Maven builds need no extra setup; IDE annotation processing must be enabled.
 
 ```bash
 mvn clean verify
@@ -47,7 +49,15 @@ ToolRegistry tools = DefaultToolRegistry.builder()
         .register(new VirtualCommandTool())
         .build();
 
-AgentRuntime runtime = new AgentLoop(llm, tools);
+RuntimeEventListener loggingListener = event ->
+        System.out.println(event.getType() + " " + event.getDetail());
+
+AgentRuntime runtime = new AgentLoop(
+        llm,
+        tools,
+        ToolPolicy.allowAll(),
+        AgentLoopOptions.defaults(),
+        Collections.singletonList(loggingListener));
 
 Agent agent = Agent.builder()
         .name("report-agent")
@@ -55,7 +65,6 @@ Agent agent = Agent.builder()
         .workspace(workspace)
         .skill(new Skill("report-writing", "Write evidence-based HTML reports.",
                 Collections.singletonList("file.write")))
-        .observer(event -> metrics.record(event.getType()))
         .build());
 
 AgentResult result = agent.input("Read /inputs/data.txt and create /report/index.html");
@@ -116,17 +125,11 @@ Applications can implement `Workspace` directly with an internal storage client.
 
 The optional `curl` virtual command only works when `VirtualCommandTool` receives a `VirtualHttpClient`. This lets the application enforce host allowlists, credentials, timeouts and audit rules without exposing the host shell.
 
-## HTTP embedding
+## Non-invasive runtime observation
 
-`AgentRuntimeHttpServer` exposes:
+AVR does not start an HTTP server or add monitoring methods to `Agent`. Register one or more `RuntimeEventListener` instances when constructing `AgentLoop`; Spring Boot applications only need to declare listener beans and the Starter collects them automatically. Events contain the run, agent and workspace identifiers, ordered sequence, state, type, detail and structured attributes. Listener failures are isolated from Agent execution.
 
-- `GET /health`
-- `POST /v1/runs` with a JSON body containing `prompt`, and optional `workspace`, `agent` and `maxSteps`
-- `POST /v1/runs/async` to start a background run
-- `GET /v1/runs/{runId}/events` for SSE event replay, live events and heartbeat
-- `GET /v1/artifacts/{artifactId}/{relativePath}` for HTML, CSS, JavaScript and text previews
-
-Plain UTF-8 prompt bodies remain supported. The application supplies `WorkspaceResolver`, so the transport does not impose an identity convention. Production deployments should add authentication and quotas at the application boundary; request bodies are limited to 1 MiB by default.
+`InMemoryRunTracker` is an optional bounded listener that projects events into `RunSnapshot` values and retains limited event history. Applications can instead implement `RuntimeEventListener` to publish to logs, metrics, OpenTelemetry, a database, MQ, SSE or WebSocket. HTTP controllers, authentication, quotas and artifact delivery remain the hosting application's responsibility.
 
 ## Modules
 
@@ -135,8 +138,7 @@ Plain UTF-8 prompt bodies remain supported. The application supplies `WorkspaceR
 - `avr-storage`: all built-in Workspace implementations in one dependency and package.
 - `avr-command`: safe virtual command vocabulary.
 - `avr-model-openai`: OpenAI-compatible Chat Completions client with native tool calling.
-- `avr-spring-boot-starter`: Spring Boot configuration binding and Agent auto-configuration.
-- `avr-server`: embeddable JDK HTTP transport.
+- `avr-spring-boot-starter`: Spring Boot configuration binding, listener discovery and Agent auto-configuration.
 - `avr-examples`: runnable end-to-end example.
 
 ## Run the example
@@ -152,6 +154,6 @@ The runnable examples build a stock-analysis agent with a real OpenAI-compatible
 
 Contributions use Gitmoji Conventional Commit subjects, for example `✨ feat: add an object-storage workspace`. See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
-完整的 Java、Maven、模型 SSE、Function Call、Tool、Workspace 和 HTTP 接入方式请参阅 [INTEGRATION.md](INTEGRATION.md)。
+完整的 Java、Maven、模型 SSE、Function Call、Tool、Workspace 和运行事件接入方式请参阅 [INTEGRATION.md](INTEGRATION.md)。
 
 Licensed under the Apache License 2.0. See [LICENSE](LICENSE).

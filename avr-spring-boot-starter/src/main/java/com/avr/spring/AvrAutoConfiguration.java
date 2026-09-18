@@ -3,6 +3,7 @@ package com.avr.spring;
 import com.avr.api.Agent;
 import com.avr.api.AgentRuntime;
 import com.avr.api.Llm;
+import com.avr.api.RuntimeEventListener;
 import com.avr.api.Skill;
 import com.avr.api.Tool;
 import com.avr.api.ToolPolicy;
@@ -156,8 +157,14 @@ public class AvrAutoConfiguration {
             Llm llm,
             ToolRegistry tools,
             ToolPolicy policy,
-            AgentLoopOptions options) {
-        return new AgentLoop(llm, tools, policy, options);
+            AgentLoopOptions options,
+            ObjectProvider<RuntimeEventListener> eventListeners) {
+        return new AgentLoop(
+                llm,
+                tools,
+                policy,
+                options,
+                eventListeners.orderedStream().collect(Collectors.toList()));
     }
 
     @Bean

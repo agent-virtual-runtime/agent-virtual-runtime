@@ -12,6 +12,8 @@ Thank you for helping build Agent Virtual Runtime.
 
 New lightweight `Workspace` implementations belong in the existing `avr-storage` module and `com.avr.storage` package. Do not create one Maven module per implementation. A separate adapter module is justified only when an optional vendor SDK would otherwise become a transitive dependency for every storage user.
 
+Use Lombok `@Getter` for immutable data objects and `@Getter`/`@Setter` for mutable configuration beans. Do not apply `@Data` to public API or credential-bearing configuration classes; keep validation, defensive copies and computed methods explicit.
+
 ## Commit messages
 
 This project uses [Gitmoji](https://gitmoji.dev/) commit messages:

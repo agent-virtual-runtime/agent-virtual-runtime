@@ -1,10 +1,13 @@
 package com.avr.api;
 
+import lombok.Getter;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 /** 智能体运行产生的最终文本、状态和 Artifact。 */
+@Getter
 public final class AgentResult {
     private final String text;
     private final int steps;
@@ -24,23 +27,4 @@ public final class AgentResult {
         this.artifacts = Collections.unmodifiableList(new ArrayList<Artifact>(artifacts));
     }
 
-    public String getText() {
-        return text;
-    }
-
-    public int getSteps() {
-        return steps;
-    }
-
-    public List<Artifact> getArtifacts() {
-        return artifacts;
-    }
-
-    public String getRunId() {
-        return runId;
-    }
-
-    public RunState getState() {
-        return state;
-    }
 }

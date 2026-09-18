@@ -3,7 +3,6 @@ package com.avr.spring;
 import com.avr.api.Agent;
 import com.avr.api.AgentRuntime;
 import com.avr.api.ExecutionContext;
-import com.avr.api.RunObserver;
 import com.avr.api.Skill;
 import com.avr.api.Workspace;
 
@@ -28,20 +27,18 @@ public final class AgentFactory {
 
     /** 使用指定工作空间创建 Agent。 */
     public Agent create(Workspace workspace) {
-        return create(workspace, ExecutionContext.empty(), RunObserver.noop());
+        return create(workspace, ExecutionContext.empty());
     }
 
-    /** 使用指定工作空间、执行上下文和观察者创建 Agent。 */
+    /** 使用指定工作空间和执行上下文创建 Agent。 */
     public Agent create(
             Workspace workspace,
-            ExecutionContext context,
-            RunObserver observer) {
+            ExecutionContext context) {
         Agent.Builder builder = Agent.builder()
                 .name(properties.getName())
                 .runtime(runtime)
                 .workspace(workspace)
                 .context(context)
-                .observer(observer)
                 .maxSteps(properties.getMaxSteps());
         for (Skill skill : skills) {
             builder.skill(skill);

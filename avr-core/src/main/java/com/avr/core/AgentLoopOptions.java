@@ -1,11 +1,14 @@
 package com.avr.core;
 
+import lombok.Getter;
+
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ForkJoinPool;
 
 /** {@link AgentLoop} 的并发、超时和循环保护配置。 */
+@Getter
 public final class AgentLoopOptions {
     private final ExecutorService toolExecutor;
     private final Duration toolTimeout;
@@ -25,22 +28,6 @@ public final class AgentLoopOptions {
 
     public static AgentLoopOptions defaults() {
         return builder().build();
-    }
-
-    public ExecutorService getToolExecutor() {
-        return toolExecutor;
-    }
-
-    public Duration getToolTimeout() {
-        return toolTimeout;
-    }
-
-    public int getMaxEmptyResponses() {
-        return maxEmptyResponses;
-    }
-
-    public int getMaxNoProgressRounds() {
-        return maxNoProgressRounds;
     }
 
     /** 构建 Agent Loop 配置。 */

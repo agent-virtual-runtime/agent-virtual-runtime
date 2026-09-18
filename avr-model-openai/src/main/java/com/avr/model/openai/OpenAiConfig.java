@@ -1,5 +1,7 @@
 package com.avr.model.openai;
 
+import lombok.Getter;
+
 import java.net.URI;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -9,6 +11,7 @@ import java.util.Map;
 import java.util.Objects;
 
 /** OpenAI 兼容 Chat Completions 端点配置。 */
+@Getter
 public final class OpenAiConfig {
     private final URI endpoint;
     private final String apiKey;
@@ -48,38 +51,6 @@ public final class OpenAiConfig {
     /** 从外部 YAML 文件加载 {@code avr.llm.openai}。 */
     public static OpenAiConfig fromYaml(Path path) {
         return OpenAiConfigYamlLoader.fromPath(path);
-    }
-
-    public URI getEndpoint() {
-        return endpoint;
-    }
-
-    public String getApiKey() {
-        return apiKey;
-    }
-
-    public String getModel() {
-        return model;
-    }
-
-    public Duration getTimeout() {
-        return timeout;
-    }
-
-    public Double getTemperature() {
-        return temperature;
-    }
-
-    public Integer getMaxTokens() {
-        return maxTokens;
-    }
-
-    public boolean isStream() {
-        return stream;
-    }
-
-    public Map<String, String> getHeaders() {
-        return headers;
     }
 
     private static URI resolveEndpoint(String apiUrl) {

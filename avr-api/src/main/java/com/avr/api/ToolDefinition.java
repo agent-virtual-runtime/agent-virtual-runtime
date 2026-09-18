@@ -1,8 +1,11 @@
 package com.avr.api;
 
+import lombok.Getter;
+
 import java.util.Objects;
 
 /** 提供给模型的工具名称、说明和输入 Schema。 */
+@Getter
 public final class ToolDefinition {
     private final String name;
     private final String description;
@@ -18,15 +21,4 @@ public final class ToolDefinition {
         this.inputSchema = Objects.requireNonNull(inputSchema, "inputSchema");
     }
 
-    public String getName() {
-        return name;
-    }
-
-    public String getDescription() {
-        return description;
-    }
-
-    public String getInputSchema() {
-        return inputSchema;
-    }
 }

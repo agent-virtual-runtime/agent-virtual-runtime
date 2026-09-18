@@ -39,7 +39,6 @@ AVR 按能力拆分模块。发布到 Maven 仓库后，通常至少引入 Core�
 | `avr-storage` | 单一依赖，包含内存、磁盘和对象存储 Workspace 实现 |
 | `avr-command` | 不启动系统进程的虚拟命令 |
 | `avr-model-openai` | OpenAI Chat Completions、SSE 和 Function Call |
-| `avr-server` | 可嵌入的 HTTP、SSE 和 Artifact 预览服务 |
 
 在 Maven 正式发布前，可以从源码执行 `mvn clean install` 安装到本地仓库。
 
@@ -331,67 +330,91 @@ Agent agent = Agent.builder()
 
 ## 8. 运行事件与异步调用
 
+运行观测是 Runtime 级能力，不挂在 `Agent` 或 `AgentRequest` 上。非 Spring 应用在创建 `AgentLoop` 时注册监听器：
+
 ```java
+RuntimeEventListener listener = event -> {
+    System.out.println(event.getSequence()
+            + " " + event.getRunId()
+            + " " + event.getAgent()
+            + " " + event.getWorkspaceId()
+            + " " + event.getType()
+            + " " + event.getDetail());
+};
+
+AgentRuntime runtime = new AgentLoop(
+        llm,
+        tools,
+        ToolPolicy.allowAll(),
+        AgentLoopOptions.defaults(),
+        Collections.singletonList(listener));
+
 Agent agent = Agent.builder()
         .runtime(runtime)
         .workspace(workspace)
-        .observer(event -> {
-            System.out.println(event.getSequence()
-                    + " " + event.getType()
-                    + " " + event.getDetail());
-        })
         .build();
 
-CompletionStage<AgentResult> future = agent.inputAsync("生成分析报告");
+CompletionStage<AgentResult> future =
+        agent.inputAsync("生成分析报告");
+```
+
+Spring Boot 应用只需声明 Bean，Starter 会将所有 `RuntimeEventListener` Bean 注册到默认 `AgentLoop`：
+
+```java
+@Bean
+public RuntimeEventListener auditListener(AuditService auditService) {
+    return event -> auditService.record(event);
+}
 ```
 
 常见事件包括：
 
-- `model.call`：开始一次模型调用；
+- `run.created`、`run.preparing`：创建并准备运行；
+- `model.call`、`model.completed`：模型调用开始与完成；
 - `model.delta`：模型 SSE 文本增量；
 - `tool.started`：开始执行 Tool；
-- `tool.completed`：Tool 成功；
-- `tool.failed`：Tool 失败；
+- `tool.completed`、`tool.failed`：Tool 执行结果；
 - `run.completed`、`run.failed`、`run.cancelled`：运行终态。
 
-## 9. 嵌入 HTTP 和 SSE 服务
+内置名称也可以通过 `RuntimeEventTypes` 常量引用，事件类型仍使用字符串，以便自定义 Runtime 扩展自己的事件。
+
+`RuntimeEvent` 是不可变对象，包含运行、Agent 和 Workspace 标识、有序序号、状态、发生时间、事件类型、说明以及结构化 `attributes`。模型完成事件会携带步骤、耗时、Tool Call 数和截断状态；Tool 事件会携带 Tool Call ID、Tool 名称、耗时和成功状态。
+
+监听器仅用于观察，抛出的运行时异常会被 Runtime 隔离，不会改变 Agent 结果。监听器默认在事件产生线程执行，因此数据库、网络或 MQ 等耗时操作应在监听器内部切换到应用管理的线程池，并自行处理队列容量和背压。
+
+### 可选的状态查询投影
+
+`InMemoryRunTracker` 同时是一个监听器。它按照配置上限保存运行快照和历史事件，但不会自动启用：
 
 ```java
-WorkspaceResolver resolver = workspaceId ->
-        new MemoryWorkspace(workspaceId);
+InMemoryRunTracker tracker = new InMemoryRunTracker(
+        1_000,
+        500);
 
-AgentRuntimeHttpServer server = new AgentRuntimeHttpServer(
-        new InetSocketAddress("0.0.0.0", 8080),
-        runtime,
-        resolver);
-server.start();
+AgentRuntime runtime = new AgentLoop(
+        llm,
+        tools,
+        ToolPolicy.allowAll(),
+        AgentLoopOptions.defaults(),
+        Collections.singletonList(tracker));
+
+Optional<RunSnapshot> snapshot = tracker.find(runId);
+List<RuntimeEvent> history = tracker.events(runId);
+List<RunSnapshot> running = tracker.running();
 ```
 
-接口：
+Spring 应用可以把它声明为 Bean，既会被 Starter 自动注册，也能注入业务 Controller：
 
-- `POST /v1/runs`：同步运行；
-- `POST /v1/runs/async`：创建后台运行；
-- `GET /v1/runs/{runId}/events`：订阅运行 SSE；
-- `GET /v1/artifacts/{artifactId}/{relativePath}`：预览 Artifact 文件；
-- `GET /health`：健康检查。
-
-启动异步任务：
-
-```bash
-curl -X POST http://localhost:8080/v1/runs/async \
-  -H 'Content-Type: application/json' \
-  -d '{"workspace":"job-42","agent":"report-agent","prompt":"生成报告"}'
+```java
+@Bean
+public InMemoryRunTracker runTracker() {
+    return new InMemoryRunTracker(1_000, 500);
+}
 ```
 
-订阅返回的事件地址：
+如果需要持久化、跨节点聚合或实时推送，直接实现 `RuntimeEventListener` 并写入数据库、Redis、Kafka、SSE 或 WebSocket。AVR 不启动 HTTP Server，也不规定应用的 URL、鉴权、Workspace 解析和响应协议。
 
-```bash
-curl -N http://localhost:8080/v1/runs/{runId}/events
-```
-
-模型 SSE 和 AVR 对外 SSE 是两层独立连接：AVR 消费模型的 SSE，再把模型文本增量、Tool 状态和运行状态统一发布给业务客户端。
-
-## 10. 生产接入建议
+## 9. 生产接入建议
 
 - Workspace 的分配、认证、租户隔离和配额由接入应用处理；
 - 使用 `ToolPolicy` 做请求级授权，不要仅依赖 Prompt；
@@ -399,5 +422,6 @@ curl -N http://localhost:8080/v1/runs/{runId}/events
 - 不要在 Tool 中直接执行模型提供的宿主机 Shell 命令；
 - 为模型、Tool 和整次任务分别设置超时；
 - 记录 `runId`、Tool 调用、耗时和失败结果；
+- 不要在事件监听器中执行无界阻塞操作；模型增量和 Tool 信息可能包含敏感内容，落库或外发前应按业务规则脱敏；
 - 将 API Key 放入密钥系统或环境变量，不要写入源码；
 - 长期运行的集中式服务应使用持久化 Workspace，而不是仅使用内存实现。

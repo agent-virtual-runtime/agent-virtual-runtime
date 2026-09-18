@@ -3,8 +3,11 @@ package com.avr.spring;
 import com.avr.api.Agent;
 import com.avr.api.AgentRuntime;
 import com.avr.api.Llm;
+import com.avr.api.LlmResponse;
+import com.avr.api.RuntimeEventListener;
 import com.avr.api.ToolRegistry;
 import com.avr.api.Workspace;
+import com.avr.core.ScriptedLlm;
 import com.avr.model.openai.OpenAiConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -36,5 +39,21 @@ class AvrAutoConfigurationTest {
             assertThat(context).hasSingleBean(AgentFactory.class);
             assertThat(context).hasSingleBean(Agent.class);
         });
+    }
+
+    @Test
+    void addsApplicationEventListenersToRuntime() {
+        java.util.concurrent.atomic.AtomicInteger eventCount =
+                new java.util.concurrent.atomic.AtomicInteger();
+
+        contextRunner
+                .withBean(Llm.class,
+                        () -> ScriptedLlm.of(LlmResponse.answer("done")))
+                .withBean(RuntimeEventListener.class,
+                        () -> event -> eventCount.incrementAndGet())
+                .run(context -> {
+                    context.getBean(Agent.class).input("create report");
+                    assertThat(eventCount.get()).isGreaterThan(0);
+                });
     }
 }

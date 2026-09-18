@@ -101,7 +101,7 @@ curl -X POST http://localhost:8080/api/reports/stock
 mvn -pl avr-examples exec:java
 ```
 
-运行过程中可以看到模型调用、文本增量、Tool 开始和完成等事件。生成成功后，终端会打印 Artifact ID 和报告绝对路径。默认报告位置为：
+非 Spring 示例在创建 `AgentLoop` 时注册 `RuntimeEventListener`，因此运行过程中可以看到模型调用、文本增量、Tool 开始和完成等事件，而 `Agent` 本身不包含监听逻辑。生成成功后，终端会打印 Artifact ID 和报告绝对路径。默认报告位置为：
 
 ```text
 avr-examples/target/stock-agent-workspace/report/report.html
@@ -116,7 +116,7 @@ avr-examples/target/stock-agent-workspace/report/report.html
 3. `Skill` 注入财务指标、事实约束、风险分析和报告结构知识；
 4. `DefaultToolRegistry` 注册文件读写、目录查看、虚拟命令和 Artifact 提交工具；
 5. `OpenAiLlm` 使用 Chat Completions SSE 和原生 Function Call；
-6. `AgentLoop` 调用模型、执行工具并把结果写回模型上下文；
+6. `AgentLoop` 调用模型、执行工具、回填模型上下文，并向 Runtime 监听器发布不可变事件；
 7. Agent 写入 `/report/report.html` 并调用 `artifact.commit`；
 8. 示例校验报告和 Artifact 都已生成，然后输出宿主机文件地址。
 

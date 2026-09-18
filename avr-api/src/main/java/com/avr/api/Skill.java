@@ -1,10 +1,13 @@
 package com.avr.api;
 
+import lombok.Getter;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 /** 注入智能体运行的可复用指令和工具提示。 */
+@Getter
 public final class Skill {
     private final String name;
     private final String instructions;
@@ -16,15 +19,4 @@ public final class Skill {
         this.tools = Collections.unmodifiableList(new ArrayList<String>(tools));
     }
 
-    public String getName() {
-        return name;
-    }
-
-    public String getInstructions() {
-        return instructions;
-    }
-
-    public List<String> getTools() {
-        return tools;
-    }
 }

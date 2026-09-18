@@ -1,11 +1,14 @@
 package com.avr.api;
 
+import lombok.Getter;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
 /** 模型上下文中的一条系统、用户、助手或工具消息。 */
+@Getter
 public final class Message {
     /** 消息在模型协议中的角色。 */
     public enum Role {
@@ -58,19 +61,4 @@ public final class Message {
                 Collections.<ToolCall>emptyList());
     }
 
-    public Role getRole() {
-        return role;
-    }
-
-    public String getContent() {
-        return content;
-    }
-
-    public String getToolCallId() {
-        return toolCallId;
-    }
-
-    public List<ToolCall> getToolCalls() {
-        return toolCalls;
-    }
 }

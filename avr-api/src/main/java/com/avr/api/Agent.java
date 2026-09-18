@@ -11,7 +11,6 @@ public final class Agent {
     private final AgentRuntime runtime;
     private final Workspace workspace;
     private final ExecutionContext context;
-    private final RunObserver observer;
     private final List<Skill> skills;
     private final int maxSteps;
     private final CancellationToken cancellationToken;
@@ -21,7 +20,6 @@ public final class Agent {
         this.runtime = Objects.requireNonNull(builder.runtime, "runtime");
         this.workspace = Objects.requireNonNull(builder.workspace, "workspace");
         this.context = builder.context;
-        this.observer = builder.observer;
         this.skills = new ArrayList<Skill>(builder.skills);
         this.maxSteps = builder.maxSteps;
         this.cancellationToken = builder.cancellationToken;
@@ -47,7 +45,6 @@ public final class Agent {
                 .prompt(prompt)
                 .workspace(workspace)
                 .context(context)
-                .observer(observer)
                 .cancellationToken(cancellationToken)
                 .maxSteps(maxSteps);
         for (Skill skill : skills) {
@@ -62,7 +59,6 @@ public final class Agent {
         private AgentRuntime runtime;
         private Workspace workspace;
         private ExecutionContext context = ExecutionContext.empty();
-        private RunObserver observer = RunObserver.noop();
         private final List<Skill> skills = new ArrayList<Skill>();
         private int maxSteps = 20;
         private CancellationToken cancellationToken = CancellationToken.none();
@@ -84,11 +80,6 @@ public final class Agent {
 
         public Builder context(ExecutionContext context) {
             this.context = Objects.requireNonNull(context, "context");
-            return this;
-        }
-
-        public Builder observer(RunObserver observer) {
-            this.observer = Objects.requireNonNull(observer, "observer");
             return this;
         }
 

@@ -1,6 +1,9 @@
 package com.avr.api;
 
+import lombok.Getter;
+
 /** 工具执行时可访问的工作空间和业务上下文。 */
+@Getter
 public final class ToolContext {
     private final Workspace workspace;
     private final ExecutionContext executionContext;
@@ -14,11 +17,4 @@ public final class ToolContext {
         this.executionContext = executionContext;
     }
 
-    public Workspace getWorkspace() {
-        return workspace;
-    }
-
-    public ExecutionContext getExecutionContext() {
-        return executionContext;
-    }
 }

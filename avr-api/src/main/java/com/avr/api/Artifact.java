@@ -1,5 +1,7 @@
 package com.avr.api;
 
+import lombok.Getter;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -7,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** 带入口文件的不可变工作空间产物快照。 */
+@Getter
 public final class Artifact {
     private final String id;
     private final String root;
@@ -27,22 +30,6 @@ public final class Artifact {
         this.contents = Collections.unmodifiableMap(new LinkedHashMap<String, String>(contents));
     }
 
-    public String getId() {
-        return id;
-    }
-
-    public String getRoot() {
-        return root;
-    }
-
-    public String getEntrypoint() {
-        return entrypoint;
-    }
-
-    public List<String> getFiles() {
-        return files;
-    }
-
     /** 从不可变快照中读取指定文本文件。 */
     public String readText(String path) {
         String content = contents.get(path);
@@ -52,7 +39,4 @@ public final class Artifact {
         return content;
     }
 
-    public Map<String, String> getContents() {
-        return contents;
-    }
 }

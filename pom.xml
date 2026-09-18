@@ -28,7 +28,6 @@
         <module>avr-command</module>
         <module>avr-model-openai</module>
         <module>avr-spring-boot-starter</module>
-        <module>avr-server</module>
         <module>avr-examples</module>
     </modules>
 
@@ -40,7 +39,18 @@
         <maven.surefire.version>3.2.5</maven.surefire.version>
         <jackson.version>2.17.3</jackson.version>
         <spring-boot.version>2.7.18</spring-boot.version>
+        <lombok.version>1.18.48</lombok.version>
     </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>${lombok.version}</version>
+            <scope>provided</scope>
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
 
     <dependencyManagement>
         <dependencies>
@@ -70,6 +80,13 @@
                     <version>${maven.compiler.version}</version>
                     <configuration>
                         <release>${maven.compiler.release}</release>
+                        <annotationProcessorPaths>
+                            <path>
+                                <groupId>org.projectlombok</groupId>
+                                <artifactId>lombok</artifactId>
+                                <version>${lombok.version}</version>
+                            </path>
+                        </annotationProcessorPaths>
                     </configuration>
                 </plugin>
                 <plugin>

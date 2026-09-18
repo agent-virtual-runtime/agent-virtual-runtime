@@ -1,8 +1,11 @@
 package com.avr.api;
 
+import lombok.Getter;
+
 import java.util.Objects;
 
 /** 一次工具调用的成功或失败结果。 */
+@Getter
 public final class ToolResult {
     private final boolean success;
     private final String content;
@@ -20,11 +23,4 @@ public final class ToolResult {
         return new ToolResult(false, content);
     }
 
-    public boolean isSuccess() {
-        return success;
-    }
-
-    public String getContent() {
-        return content;
-    }
 }

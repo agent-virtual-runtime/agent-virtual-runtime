@@ -6,6 +6,7 @@ import com.avr.api.Artifact;
 import com.avr.api.Skill;
 import com.avr.api.ToolRegistry;
 import com.avr.api.Workspace;
+import com.avr.api.RuntimeEvent;
 import com.avr.command.VirtualCommandTool;
 import com.avr.core.AgentLoop;
 import com.avr.core.AgentLoopOptions;
@@ -55,17 +56,20 @@ public final class StockReportAgentExample {
                 .maxNoProgressRounds(5)
                 .build();
 
+        AgentLoop runtime = new AgentLoop(
+                new OpenAiLlm(modelConfig),
+                tools,
+                com.avr.api.ToolPolicy.allowAll(),
+                loopOptions,
+                java.util.Collections.singletonList(
+                        StockReportAgentExample::printEvent));
+
         Agent agent = Agent.builder()
                 .name("stock-report-agent")
-                .runtime(new AgentLoop(
-                        new OpenAiLlm(modelConfig),
-                        tools,
-                        com.avr.api.ToolPolicy.allowAll(),
-                        loopOptions))
+                .runtime(runtime)
                 .workspace(workspace)
                 .skill(financialAnalysisSkill())
                 .maxSteps(12)
-                .observer(StockReportAgentExample::printEvent)
                 .build();
 
         System.out.println("Using model: " + modelConfig.getModel());
@@ -143,7 +147,7 @@ public final class StockReportAgentExample {
         return result.getArtifacts().get(result.getArtifacts().size() - 1);
     }
 
-    private static void printEvent(com.avr.api.RunEvent event) {
+    private static void printEvent(RuntimeEvent event) {
         if ("model.delta".equals(event.getType())) {
             System.out.print(event.getDetail());
             return;
