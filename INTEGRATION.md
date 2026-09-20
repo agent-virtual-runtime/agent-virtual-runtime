@@ -8,7 +8,7 @@ AVR 按能力拆分模块。发布到 Maven 仓库后，通常至少引入 Core�
 
 ```xml
 <properties>
-    <avr.version>1.0.0</avr.version>
+    <avr.version>1.0.1</avr.version>
 </properties>
 
 <dependencies>

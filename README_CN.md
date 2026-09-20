@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README_CN.md)
 
+维护者发布 Maven Central 请参阅 [发布指南](RELEASING.md)。
+
 > 面向中心化 AI Agent 的轻量级虚拟执行环境。
 
 Agent Virtual Runtime 是一个兼容 Java 11 及以上版本的 Agent Runtime 框架。它为 AI Agent 提供由文件、命令、Skill、Artifact 和其他 Agent 组成的虚拟世界，无需为每次运行创建容器或虚拟机。AVR 负责执行标准 Agent Loop，接入应用继续掌控身份体系、Workspace 命名、隔离策略和存储结构。
@@ -41,11 +43,13 @@ mvn clean verify
 
 引入 Starter：
 
+以下坐标在 `1.0.1` 正式发布到 Maven Central 后可直接使用。
+
 ```xml
 <dependency>
     <groupId>io.github.agent-virtual-runtime</groupId>
     <artifactId>avr-spring-boot-starter</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.1</version>
 </dependency>
 ```
 

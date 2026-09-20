@@ -4,6 +4,7 @@ All notable changes will be documented in this file.
 
 ## Unreleased
 
+- Prepared version `1.0.1` and a tag-triggered Maven Central upload with manual Portal publishing.
 - Changed all Maven coordinates from `org.agentvirtualruntime` to `io.github.agent-virtual-runtime`.
 - Consolidated `avr-storage-memory`, `avr-storage-disk` and `avr-storage-object` into the single `avr-storage` module.
 - Moved built-in Workspace implementations to the `com.avr.storage` package. Existing imports from `com.avr.storage.memory`, `com.avr.storage.disk` and `com.avr.storage.object` must be updated.

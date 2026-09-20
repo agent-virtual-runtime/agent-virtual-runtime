@@ -6,7 +6,7 @@
     <parent>
         <groupId>io.github.agent-virtual-runtime</groupId>
         <artifactId>avr-parent</artifactId>
-        <version>1.0.0</version>
+        <version>1.0.1</version>
     </parent>
     <artifactId>avr-spring-boot-starter</artifactId>
     <name>AVR Spring Boot Starter</name>

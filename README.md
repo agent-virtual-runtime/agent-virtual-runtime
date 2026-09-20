@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README_CN.md)
 
+Maintainers: see [Maven Central release guide](RELEASING.md).
+
 > A lightweight virtual execution environment for centralized AI agents.
 
 Agent Virtual Runtime is a Java 11+ framework that gives an AI agent a virtual world—files, commands, skills, artifacts and other agents—without provisioning a container or VM for every run. AVR owns a model-neutral agent loop while applications retain control over identity, tenancy, workspace naming and storage topology.
