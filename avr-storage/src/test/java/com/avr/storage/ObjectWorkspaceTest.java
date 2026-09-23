@@ -14,6 +14,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ObjectWorkspaceTest {
     @Test
@@ -22,6 +23,10 @@ class ObjectWorkspaceTest {
         ObjectWorkspace workspace = new ObjectWorkspace("opaque", store, "business/work-1");
         workspace.writeText("/site/index.html", "first");
         workspace.writeText("/site/app.js", "run()");
+        workspace.appendText("/site/app.js", ";ready()");
+        assertEquals(1, workspace.replaceText(
+                "/site/app.js", "ready()", "start()", false));
+        assertEquals("run();start()", workspace.readText("/site/app.js"));
 
         Artifact artifact = workspace.commitArtifact("/site", "index.html");
         workspace.writeText("/site/index.html", "second");
@@ -37,6 +42,24 @@ class ObjectWorkspaceTest {
         assertEquals("first", restored.artifacts().get(0).readText("/site/index.html"));
         assertThrows(IllegalArgumentException.class,
                 () -> restored.writeText("/.avr/metadata", "x"));
+    }
+
+    @Test
+    void keepsEmptyDirectoriesAndSupportsMerge() {
+        MemoryObjectStore store = new MemoryObjectStore();
+        ObjectWorkspace workspace = new ObjectWorkspace("opaque", store, "tenant/session");
+        workspace.createDirectory("/workspace/first/empty");
+        workspace.writeText("/workspace/first/a.txt", "a");
+        workspace.createDirectory("/workspace/second");
+        workspace.writeText("/workspace/second/b.txt", "b");
+
+        workspace.copyDirectory("/workspace/first", "/workspace/second", true);
+        assertTrue(workspace.exists("/workspace/second/a.txt"));
+        assertTrue(workspace.directoryExists("/workspace/second/empty"));
+        assertThrows(IllegalStateException.class, () -> workspace.deleteDirectory(
+                "/workspace/second", false));
+        workspace.deleteDirectory("/workspace/first", true);
+        assertFalse(workspace.directoryExists("/workspace/first"));
     }
 
     private static final class MemoryObjectStore implements ObjectStore {

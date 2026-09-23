@@ -6,7 +6,10 @@ import com.avr.api.Llm;
 import com.avr.api.LlmResponse;
 import com.avr.api.RuntimeEventListener;
 import com.avr.api.ToolRegistry;
+import com.avr.api.WebSearchProvider;
+import com.avr.api.WebSearchResult;
 import com.avr.api.Workspace;
+import com.avr.core.AgentLoopOptions;
 import com.avr.core.ScriptedLlm;
 import com.avr.model.openai.OpenAiConfig;
 import org.junit.jupiter.api.Test;
@@ -26,6 +29,8 @@ class AvrAutoConfigurationTest {
                             "avr.workspace.type=memory",
                             "avr.workspace.id=stock-report",
                             "avr.agent.name=stock-agent",
+                            "avr.agent.max-step-multiplier=4",
+                            "avr.agent.loop-timeout=45m",
                             "avr.agent.instructions=Use supplied financial data only");
 
     @Test
@@ -38,6 +43,10 @@ class AvrAutoConfigurationTest {
             assertThat(context).hasSingleBean(Workspace.class);
             assertThat(context).hasSingleBean(AgentFactory.class);
             assertThat(context).hasSingleBean(Agent.class);
+            assertThat(context.getBean(AgentLoopOptions.class)
+                    .getMaxStepMultiplier()).isEqualTo(4);
+            assertThat(context.getBean(AgentLoopOptions.class)
+                    .getLoopTimeout()).isEqualTo(java.time.Duration.ofMinutes(45));
         });
     }
 
@@ -55,5 +64,18 @@ class AvrAutoConfigurationTest {
                     context.getBean(Agent.class).input("create report");
                     assertThat(eventCount.get()).isGreaterThan(0);
                 });
+    }
+
+    @Test
+    void registersRuntimeWebSearchOnlyWhenApplicationProvidesProvider() {
+        contextRunner
+                .withBean(WebSearchProvider.class,
+                        () -> (request, executionContext) ->
+                                new WebSearchResult(
+                                        request.getQuery(), java.util.Collections.emptyList()))
+                .run(context -> assertThat(context.getBean(ToolRegistry.class)
+                        .definitions())
+                        .anyMatch(definition ->
+                                "web.search".equals(definition.getName())));
     }
 }

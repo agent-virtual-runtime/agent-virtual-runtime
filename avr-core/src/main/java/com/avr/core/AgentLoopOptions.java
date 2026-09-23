@@ -12,12 +12,16 @@ import java.util.concurrent.ForkJoinPool;
 public final class AgentLoopOptions {
     private final ExecutorService toolExecutor;
     private final Duration toolTimeout;
+    private final Duration loopTimeout;
+    private final int maxStepMultiplier;
     private final int maxEmptyResponses;
     private final int maxNoProgressRounds;
 
     private AgentLoopOptions(Builder builder) {
         this.toolExecutor = builder.toolExecutor;
         this.toolTimeout = builder.toolTimeout;
+        this.loopTimeout = builder.loopTimeout;
+        this.maxStepMultiplier = builder.maxStepMultiplier;
         this.maxEmptyResponses = builder.maxEmptyResponses;
         this.maxNoProgressRounds = builder.maxNoProgressRounds;
     }
@@ -34,6 +38,8 @@ public final class AgentLoopOptions {
     public static final class Builder {
         private ExecutorService toolExecutor = ForkJoinPool.commonPool();
         private Duration toolTimeout = Duration.ofMinutes(5);
+        private Duration loopTimeout = Duration.ofMinutes(90);
+        private int maxStepMultiplier = 3;
         private int maxEmptyResponses = 1;
         private int maxNoProgressRounds = 5;
 
@@ -46,6 +52,21 @@ public final class AgentLoopOptions {
         public Builder toolTimeout(Duration toolTimeout) {
             this.toolTimeout = Objects.requireNonNull(
                     toolTimeout, "toolTimeout");
+            return this;
+        }
+
+        /** 设置一次 Agent 运行的整体时间预算。 */
+        public Builder loopTimeout(Duration loopTimeout) {
+            this.loopTimeout = Objects.requireNonNull(loopTimeout, "loopTimeout");
+            return this;
+        }
+
+        /** 设置软步数上限可自动延展的倍数，1 表示不延展。 */
+        public Builder maxStepMultiplier(int maxStepMultiplier) {
+            if (maxStepMultiplier < 1) {
+                throw new IllegalArgumentException("maxStepMultiplier must be positive");
+            }
+            this.maxStepMultiplier = maxStepMultiplier;
             return this;
         }
 
@@ -65,6 +86,9 @@ public final class AgentLoopOptions {
         public AgentLoopOptions build() {
             if (toolTimeout.isZero() || toolTimeout.isNegative()) {
                 throw new IllegalArgumentException("toolTimeout must be positive");
+            }
+            if (loopTimeout.isZero() || loopTimeout.isNegative()) {
+                throw new IllegalArgumentException("loopTimeout must be positive");
             }
             return new AgentLoopOptions(this);
         }

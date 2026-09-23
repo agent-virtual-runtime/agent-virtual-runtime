@@ -92,6 +92,10 @@ final class OpenAiConfigYamlLoader {
         if (maxTokens != null) {
             builder.maxTokens(maxTokens.intValue());
         }
+        Number maxRetries = number(values, "max-retries", "maxRetries");
+        if (maxRetries != null) {
+            builder.maxRetries(maxRetries.intValue());
+        }
         Boolean stream = bool(values, "stream");
         if (stream != null) {
             builder.stream(stream);

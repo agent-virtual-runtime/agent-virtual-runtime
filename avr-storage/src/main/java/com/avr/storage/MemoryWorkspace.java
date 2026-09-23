@@ -2,6 +2,7 @@ package com.avr.storage;
 
 import com.avr.api.Artifact;
 import com.avr.api.Workspace;
+import com.avr.api.WorkspaceEntry;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -15,10 +16,12 @@ import java.util.UUID;
 public final class MemoryWorkspace implements Workspace {
     private final String id;
     private final Map<String, String> files = new LinkedHashMap<String, String>();
+    private final java.util.Set<String> directories = new java.util.LinkedHashSet<String>();
     private final List<Artifact> artifacts = new ArrayList<Artifact>();
 
     public MemoryWorkspace(String id) {
         this.id = Objects.requireNonNull(id, "id");
+        directories.add("/");
     }
 
     @Override
@@ -51,7 +54,47 @@ public final class MemoryWorkspace implements Workspace {
 
     @Override
     public synchronized void writeText(String path, String content) {
-        files.put(normalizeFile(path), Objects.requireNonNull(content, "content"));
+        String normalized = normalizeFile(path);
+        addParents(normalized);
+        files.put(normalized, Objects.requireNonNull(content, "content"));
+    }
+
+    @Override
+    public synchronized void createDirectory(String path) {
+        String normalized = normalizeDirectoryPath(path);
+        addParents(normalized + "/file");
+        directories.add(normalized);
+    }
+
+    @Override
+    public synchronized boolean directoryExists(String path) {
+        return directories.contains(normalizeDirectoryPath(path));
+    }
+
+    @Override
+    public synchronized List<WorkspaceEntry> entries(String directory) {
+        String root = normalizeDirectory(directory);
+        Map<String, WorkspaceEntry> result = new LinkedHashMap<String, WorkspaceEntry>();
+        for (String path : directories) {
+            addDirectEntry(root, path, true, 0, result);
+        }
+        for (Map.Entry<String, String> file : files.entrySet()) {
+            addDirectEntry(root, file.getKey(), false, file.getValue().length(), result);
+        }
+        List<WorkspaceEntry> entries = new ArrayList<WorkspaceEntry>(result.values());
+        entries.sort(java.util.Comparator.comparing(WorkspaceEntry::getPath));
+        return Collections.unmodifiableList(entries);
+    }
+
+    @Override
+    public synchronized void appendText(String path, String content) {
+        Workspace.super.appendText(path, content);
+    }
+
+    @Override
+    public synchronized int replaceText(
+            String path, String oldText, String newText, boolean replaceAll) {
+        return Workspace.super.replaceText(path, oldText, newText, replaceAll);
     }
 
     @Override
@@ -60,6 +103,22 @@ public final class MemoryWorkspace implements Workspace {
         if (files.remove(normalized) == null) {
             throw new IllegalArgumentException("file does not exist: " + normalized);
         }
+    }
+
+    @Override
+    public synchronized void deleteDirectory(String path, boolean recursive) {
+        String normalized = normalizeDirectoryPath(path);
+        if ("/".equals(normalized)) {
+            throw new IllegalArgumentException("workspace root cannot be deleted");
+        }
+        String prefix = normalized + "/";
+        boolean hasChildren = files.keySet().stream().anyMatch(value -> value.startsWith(prefix))
+                || directories.stream().anyMatch(value -> value.startsWith(prefix));
+        if (hasChildren && !recursive) {
+            throw new IllegalStateException("directory is not empty: " + normalized);
+        }
+        files.keySet().removeIf(value -> value.startsWith(prefix));
+        directories.removeIf(value -> value.equals(normalized) || value.startsWith(prefix));
     }
 
     @Override
@@ -95,6 +154,40 @@ public final class MemoryWorkspace implements Workspace {
     private static String normalizeDirectory(String path) {
         String normalized = normalize(path);
         return normalized.endsWith("/") ? normalized : normalized + "/";
+    }
+
+    private static String normalizeDirectoryPath(String path) {
+        String normalized = normalize(path);
+        return normalized.length() > 1 && normalized.endsWith("/")
+                ? normalized.substring(0, normalized.length() - 1)
+                : normalized;
+    }
+
+    private void addParents(String file) {
+        int slash = file.lastIndexOf('/');
+        while (slash > 0) {
+            directories.add(file.substring(0, slash));
+            slash = file.lastIndexOf('/', slash - 1);
+        }
+        directories.add("/");
+    }
+
+    private static void addDirectEntry(
+            String root,
+            String path,
+            boolean directory,
+            long size,
+            Map<String, WorkspaceEntry> result) {
+        if (path.equals(root.substring(0, root.length() - 1)) || !path.startsWith(root)) {
+            return;
+        }
+        String relative = path.substring(root.length());
+        if (relative.isEmpty() || relative.contains("/")) {
+            return;
+        }
+        result.put(path, new WorkspaceEntry(path,
+                directory ? WorkspaceEntry.Type.DIRECTORY : WorkspaceEntry.Type.FILE,
+                size));
     }
 
     private static String normalizeFile(String path) {

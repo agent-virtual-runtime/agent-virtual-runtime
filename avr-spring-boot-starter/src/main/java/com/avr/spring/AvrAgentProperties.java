@@ -13,8 +13,12 @@ import java.time.Duration;
 public class AvrAgentProperties {
     /** Agent 名称。 */
     private String name = "default";
-    /** 单次运行允许的最大循环步数。 */
-    private int maxSteps = 20;
+    /** 单次运行推荐的循环步数软上限；有进展时可以自动延展。 */
+    private int maxSteps = 30;
+    /** 自动延展的硬上限倍数，硬上限等于 maxSteps 乘以该值。 */
+    private int maxStepMultiplier = 3;
+    /** 单次 Agent Loop 的整体时间预算。 */
+    private Duration loopTimeout = Duration.ofMinutes(90);
     /** 单个工具调用的最长等待时间。 */
     private Duration toolTimeout = Duration.ofMinutes(5);
     /** 模型连续空响应的最大重试次数。 */

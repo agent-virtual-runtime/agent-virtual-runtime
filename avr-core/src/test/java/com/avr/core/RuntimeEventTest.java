@@ -7,10 +7,13 @@ import com.avr.api.RunState;
 import com.avr.api.RuntimeEvent;
 import com.avr.api.RuntimeEventListener;
 import com.avr.api.ToolPolicy;
+import com.avr.api.ToolCall;
+import com.avr.core.tool.FileOpTool;
 import com.avr.storage.MemoryWorkspace;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -71,6 +74,46 @@ class RuntimeEventTest {
 
         assertFalse(tracker.find("run-1").isPresent());
         assertTrue(tracker.find("run-2").isPresent());
+    }
+
+    @Test
+    void toolEventsExposeDisplayMetadataAndBoundedResultPreview() {
+        InMemoryRunTracker tracker = new InMemoryRunTracker(10, 20);
+        MemoryWorkspace workspace = new MemoryWorkspace("workspace-tool-events");
+        workspace.writeText("/workspace/report.md", "report content");
+        AgentLoop loop = new AgentLoop(
+                ScriptedLlm.of(
+                        LlmResponse.calls(Collections.singletonList(new ToolCall(
+                                "call-1", "file.op",
+                                java.util.Map.<String, Object>of(
+                                        "op", "read", "path", "/workspace/report.md")))),
+                        LlmResponse.answer("done")),
+                DefaultToolRegistry.builder().register(new FileOpTool()).build(),
+                ToolPolicy.allowAll(), AgentLoopOptions.defaults(),
+                Collections.singletonList(tracker));
+
+        com.avr.api.AgentResult result = loop.run(AgentRequest.builder()
+                .agent("report-agent")
+                .prompt("read report")
+                .workspace(workspace)
+                .build());
+
+        RuntimeEvent completed = tracker.events(result.getRunId()).stream()
+                .filter(event -> "tool.completed".equals(event.getType()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("missing tool event"));
+        RuntimeEvent started = tracker.events(result.getRunId()).stream()
+                .filter(event -> "tool.started".equals(event.getType()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("missing tool start event"));
+        assertEquals(started.getAttributes().get("toolCallId"),
+                completed.getAttributes().get("toolCallId"));
+        assertFalse(completed.getOccurredAt().isBefore(started.getOccurredAt()));
+        assertEquals("操作文件", completed.getAttributes().get("displayName"));
+        assertEquals("JSON", completed.getAttributes().get("displayType"));
+        assertTrue(String.valueOf(completed.getAttributes().get("resultPreview"))
+                .contains("report content"));
+        assertTrue(((Number) completed.getAttributes().get("durationMillis")).longValue() >= 0);
     }
 
     private static RuntimeEvent event(

@@ -14,18 +14,23 @@ import com.avr.api.Skill;
 import com.avr.api.Tool;
 import com.avr.api.ToolCall;
 import com.avr.api.ToolContext;
+import com.avr.api.ToolDefinition;
 import com.avr.api.ToolExecutionMode;
 import com.avr.api.ToolPolicy;
 import com.avr.api.ToolRegistry;
 import com.avr.api.ToolResult;
+import com.avr.api.WebSearchMode;
+import com.avr.core.tool.PlanTool;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -36,6 +41,7 @@ import java.util.logging.Logger;
 /** 默认的模型调用、工具执行和结果回填循环。 */
 public final class AgentLoop implements AgentRuntime {
     private static final Logger LOGGER = Logger.getLogger(AgentLoop.class.getName());
+    private static final int MAX_COMPLETION_RETRIES = 2;
     private static final String SYSTEM_PROMPT =
             "You are running inside Agent Virtual Runtime. "
                     + "Use only the tools provided by the runtime.";
@@ -99,32 +105,63 @@ public final class AgentLoop implements AgentRuntime {
 
         List<Message> messages = new ArrayList<Message>();
         messages.add(Message.system(systemPrompt(request)));
+        messages.addAll(request.getHistory());
         messages.add(Message.user(request.getPrompt()));
         int emptyResponses = 0;
         int noProgressRounds = 0;
+        int completionRetries = 0;
+        int softStepLimit = request.getMaxSteps();
+        int hardStepLimit = hardStepLimit(
+                softStepLimit, options.getMaxStepMultiplier());
+        long deadline = System.nanoTime() + options.getLoopTimeout().toNanos();
+        Set<String> successfulRoundFingerprints = new LinkedHashSet<String>();
+        PlanTool planTool = planTool(request.isPlanMode());
 
         try {
-            for (int step = 1; step <= request.getMaxSteps(); step++) {
+            List<ToolDefinition> modelTools = modelTools(request.getWebSearchMode());
+            for (int step = 1; step <= hardStepLimit; step++) {
+                AgentResult timedOut = timedOut(
+                        request, runId, sequence, step - 1, deadline);
+                if (timedOut != null) {
+                    return timedOut;
+                }
                 AgentResult cancelled = cancelled(request, runId, sequence, step - 1,
                         "cancelled before model call");
                 if (cancelled != null) {
                     return cancelled;
                 }
 
+                if (step == softStepLimit + 1) {
+                    emit(request, runId, sequence, RunState.CALLING_MODEL,
+                            RuntimeEventTypes.RUN_EXTENDED,
+                            "agent is still making progress", attributes(
+                                    "softStepLimit", softStepLimit,
+                                    "hardStepLimit", hardStepLimit,
+                                    "step", step));
+                }
+
                 emit(request, runId, sequence, RunState.CALLING_MODEL,
-                        RuntimeEventTypes.MODEL_CALL, String.valueOf(step));
+                        RuntimeEventTypes.MODEL_CALL, String.valueOf(step),
+                        attributes("toolDefinitionCount", modelTools.size(),
+                                "webSearchMode",
+                                request.getWebSearchMode().name().toLowerCase()));
                 long modelStartedAt = System.nanoTime();
                 LlmResponse response = llm.chat(
-                        messages,
-                        tools.definitions(),
+                        request.getModel(), messages,
+                        modelTools,
+                        request.getWebSearchMode() == WebSearchMode.NATIVE,
                         delta -> emit(request, runId, sequence, RunState.CALLING_MODEL,
-                                RuntimeEventTypes.MODEL_DELTA, delta));
+                                RuntimeEventTypes.MODEL_DELTA, delta),
+                        delta -> emit(request, runId, sequence, RunState.CALLING_MODEL,
+                                RuntimeEventTypes.MODEL_REASONING_DELTA, delta));
                 emit(request, runId, sequence, RunState.CALLING_MODEL,
                         RuntimeEventTypes.MODEL_COMPLETED,
                         response.getText(), attributes(
                                 "step", step,
                                 "durationMillis", elapsedMillis(modelStartedAt),
                                 "toolCallCount", response.getToolCalls().size(),
+                                "finishReason", response.getFinishReason() == null
+                                        ? "unknown" : response.getFinishReason(),
                                 "truncated", response.isTruncated()));
 
                 if (response.isTruncated()) {
@@ -146,6 +183,29 @@ public final class AgentLoop implements AgentRuntime {
                     if (response.getText().trim().isEmpty()) {
                         throw new IllegalStateException("model returned an empty response");
                     }
+                    boolean planComplete = !request.isPlanMode()
+                            || planTool.isComplete(runId, request.getWorkspace());
+                    if (!planComplete
+                            || !request.getCompletionCheck().test(request.getWorkspace())) {
+                        completionRetries++;
+                        emit(request, runId, sequence, RunState.CALLING_MODEL,
+                                RuntimeEventTypes.MODEL_COMPLETION_REJECTED,
+                                planComplete ? "completion condition was not met"
+                                        : "plan is missing or has unfinished/unverified steps",
+                                attributes("attempt", completionRetries));
+                        if (completionRetries > MAX_COMPLETION_RETRIES) {
+                            throw new IllegalStateException(
+                                    "agent completion check failed: plan or workspace task is unfinished");
+                        }
+                        messages.add(Message.assistant(response.getText()));
+                        messages.add(Message.user(
+                                "The task is not verified. Do not claim success. Create a plan "
+                                        + "with plan.manage if needed, execute every step using "
+                                        + "real tools, then call plan.manage check. The runtime "
+                                        + "reconciles completed steps and matches evidence automatically; "
+                                        + "do not provide or guess call IDs."));
+                        continue;
+                    }
                     messages.add(Message.assistant(response.getText()));
                     emit(request, runId, sequence, RunState.COMPLETED,
                             RuntimeEventTypes.RUN_COMPLETED,
@@ -159,22 +219,106 @@ public final class AgentLoop implements AgentRuntime {
                         response.getText(), response.getToolCalls()));
                 List<ToolResult> results = executeCalls(
                         response.getToolCalls(), request, runId, sequence);
-                boolean madeProgress = false;
+                boolean hasSuccessfulTool = false;
                 for (int index = 0; index < results.size(); index++) {
                     ToolCall call = response.getToolCalls().get(index);
                     ToolResult result = results.get(index);
                     messages.add(Message.tool(call.getId(), result.getContent()));
-                    madeProgress |= result.isSuccess();
+                    hasSuccessfulTool |= result.isSuccess();
                 }
+                String roundFingerprint = roundFingerprint(
+                        response.getToolCalls(), results);
+                boolean madeProgress = hasSuccessfulTool
+                        && successfulRoundFingerprints.add(roundFingerprint);
                 noProgressRounds = madeProgress ? 0 : noProgressRounds + 1;
                 checkProgressFuse(noProgressRounds);
             }
-            throw new IllegalStateException("agent exceeded maxSteps=" + request.getMaxSteps());
+            throw new IllegalStateException(
+                    "agent exhausted step budget: softLimit=" + softStepLimit
+                            + ", hardLimit=" + hardStepLimit);
         } catch (RuntimeException exception) {
             emit(request, runId, sequence, RunState.FAILED,
                     RuntimeEventTypes.RUN_FAILED, exception.getMessage());
             throw exception;
+        } finally {
+            if (planTool != null) {
+                planTool.release(runId);
+            }
         }
+    }
+
+    private List<ToolDefinition> modelTools(WebSearchMode webSearchMode) {
+        List<ToolDefinition> result = new ArrayList<ToolDefinition>();
+        boolean runtimeSearchRegistered = false;
+        for (ToolDefinition definition : tools.definitions()) {
+            if ("web.search".equals(definition.getName())) {
+                runtimeSearchRegistered = true;
+                if (webSearchMode != WebSearchMode.RUNTIME) {
+                    continue;
+                }
+            }
+            result.add(definition);
+        }
+        if (webSearchMode == WebSearchMode.RUNTIME && !runtimeSearchRegistered) {
+            throw new IllegalStateException(
+                    "runtime web search is enabled but no web.search tool is configured");
+        }
+        return Collections.unmodifiableList(result);
+    }
+
+    private PlanTool planTool(boolean required) {
+        try {
+            Tool tool = tools.require("plan.manage");
+            if (tool instanceof PlanTool) {
+                return (PlanTool) tool;
+            }
+        } catch (RuntimeException exception) {
+            if (!required) {
+                return null;
+            }
+        }
+        if (required) {
+            throw new IllegalStateException("plan mode requires the standard plan.manage tool");
+        }
+        return null;
+    }
+
+    private AgentResult timedOut(
+            AgentRequest request,
+            String runId,
+            AtomicLong sequence,
+            int steps,
+            long deadline) {
+        if (System.nanoTime() - deadline < 0) {
+            return null;
+        }
+        emit(request, runId, sequence, RunState.TIMED_OUT,
+                RuntimeEventTypes.RUN_TIMED_OUT,
+                "agent exceeded loop timeout " + options.getLoopTimeout());
+        return new AgentResult(runId, RunState.TIMED_OUT, "", steps,
+                request.getWorkspace().artifacts());
+    }
+
+    private static int hardStepLimit(int softLimit, int multiplier) {
+        long calculated = (long) softLimit * multiplier;
+        return calculated > Integer.MAX_VALUE
+                ? Integer.MAX_VALUE
+                : (int) calculated;
+    }
+
+    /** 相同工具参数与结果重复出现时不再视为有效进展。 */
+    private static String roundFingerprint(
+            List<ToolCall> calls, List<ToolResult> results) {
+        StringBuilder fingerprint = new StringBuilder();
+        for (int index = 0; index < calls.size(); index++) {
+            ToolCall call = calls.get(index);
+            ToolResult result = results.get(index);
+            fingerprint.append(call.getName()).append(':')
+                    .append(call.getArguments().hashCode()).append(':')
+                    .append(result.isSuccess()).append(':')
+                    .append(result.getContent().hashCode()).append(';');
+        }
+        return fingerprint.toString();
     }
 
     private List<ToolResult> executeCalls(
@@ -239,6 +383,7 @@ public final class AgentLoop implements AgentRuntime {
                     "ERROR ExecutionException: " + rootMessage(exception));
         }
         emitToolResult(request, runId, sequence, call, result, startedAt);
+        recordPlanEvidence(runId, call, result);
         return result;
     }
 
@@ -273,20 +418,46 @@ public final class AgentLoop implements AgentRuntime {
             results.set(pending.index, result);
             emitToolResult(request, runId, sequence, pending.call, result,
                     pending.startedAt);
+            recordPlanEvidence(runId, pending.call, result);
+        }
+    }
+
+    private void recordPlanEvidence(String runId, ToolCall call, ToolResult result) {
+        PlanTool plan = planTool(false);
+        if (plan != null) {
+            plan.record(runId, call, result);
         }
     }
 
     private ToolResult execute(ToolCall call, AgentRequest request) {
         try {
+            PlanTool plan = planTool(false);
+            if (request.isPlanMode() && plan != null
+                    && mutatesWorkspace(call) && !plan.hasPlan(request.getRunId())) {
+                return ToolResult.failure(
+                        "create a plan with plan.manage before changing the workspace");
+            }
             Tool tool = tools.require(call.getName());
             policy.authorize(request.getContext(), request.getWorkspace(), call);
             return tool.execute(call,
-                    new ToolContext(request.getWorkspace(), request.getContext()));
+                    new ToolContext(request.getWorkspace(), request.getContext(), request.getRunId()));
         } catch (RuntimeException exception) {
             return ToolResult.failure(
                     "ERROR " + exception.getClass().getSimpleName()
                             + ": " + exception.getMessage());
         }
+    }
+
+    private static boolean mutatesWorkspace(ToolCall call) {
+        String name = call.getName();
+        String op = String.valueOf(call.getArguments().get("op"));
+        if ("file.op".equals(name)) {
+            return !"list".equals(op) && !"read".equals(op) && !"search".equals(op);
+        }
+        if ("directory.manage".equals(name)) {
+            return !"list".equals(op);
+        }
+        return "artifact.commit".equals(name);
     }
 
     private Tool findTool(ToolCall call) {
@@ -308,11 +479,7 @@ public final class AgentLoop implements AgentRuntime {
                 result.isSuccess()
                         ? RuntimeEventTypes.TOOL_COMPLETED
                         : RuntimeEventTypes.TOOL_FAILED,
-                call.getName(), attributes(
-                        "toolCallId", call.getId(),
-                        "toolName", call.getName(),
-                        "success", result.isSuccess(),
-                        "durationMillis", elapsedMillis(startedAt)));
+                call.getName(), toolResultAttributes(call, result, startedAt));
     }
 
     private AgentResult cancelled(
@@ -347,6 +514,16 @@ public final class AgentLoop implements AgentRuntime {
 
     private static String systemPrompt(AgentRequest request) {
         StringBuilder prompt = new StringBuilder(SYSTEM_PROMPT);
+        if (request.isPlanMode()) {
+            prompt.append("\nFor this task, create a plan with plan.manage before changing the workspace. "
+                    + "Carry out each step using real tools, then call plan.manage check. "
+                    + "The runtime reconciles completed steps and matches successful tool "
+                    + "evidence automatically. update is optional for progress tracking. "
+                    + "If a pending step verifies the wrong deliverable, revise it instead of "
+                    + "repeating a failing update. For a split large deliverable, verify the "
+                    + "output directory and its aggregate minBytes, not an index or README file. "
+                    + "Do not describe imagined files or changes as completed.");
+        }
         for (Skill skill : request.getSkills()) {
             prompt.append("\n\nSkill: ").append(skill.getName()).append('\n')
                     .append(skill.getInstructions());
@@ -397,10 +574,51 @@ public final class AgentLoop implements AgentRuntime {
         }
     }
 
-    private static Map<String, Object> toolAttributes(ToolCall call) {
-        return attributes(
+    private Map<String, Object> toolAttributes(ToolCall call) {
+        Map<String, Object> result = attributes(
                 "toolCallId", call.getId(),
                 "toolName", call.getName());
+        Tool tool = findTool(call);
+        if (tool != null) {
+            result.put("displayName", tool.definition().getDisplayName());
+            result.put("displayType", tool.definition().getDisplayType().name());
+        }
+        Map<String, Object> argumentSummary = new LinkedHashMap<String, Object>();
+        for (Map.Entry<String, Object> entry : call.getArguments().entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof String && ((String) value).length() > 500) {
+                argumentSummary.put(entry.getKey(),
+                        "<" + ((String) value).length() + " chars>");
+            } else {
+                argumentSummary.put(entry.getKey(), value);
+            }
+        }
+        result.put("arguments", argumentSummary);
+        for (String key : new String[]{"path", "source", "target", "root", "entrypoint"}) {
+            Object value = call.getArguments().get(key);
+            if (value instanceof String) {
+                result.put(key, value);
+            }
+        }
+        return result;
+    }
+
+    private Map<String, Object> toolResultAttributes(
+            ToolCall call, ToolResult result, long startedAt) {
+        Map<String, Object> values = toolAttributes(call);
+        values.put("success", result.isSuccess());
+        values.put("durationMillis", elapsedMillis(startedAt));
+        values.put("resultLength", result.getContent().length());
+        if (result.getRowCount() != null) {
+            values.put("rows", result.getRowCount());
+        }
+        if (result.getDisplayType() != null) {
+            values.put("displayType", result.getDisplayType().name());
+        }
+        values.put("resultPreview", result.getContent().length() > 20_000
+                ? result.getContent().substring(0, 20_000) + "\n...(truncated)"
+                : result.getContent());
+        return values;
     }
 
     private static Map<String, Object> attributes(Object... values) {

@@ -5,3 +5,4 @@
 target/
 **/target/
 docs/
+design-qa.md

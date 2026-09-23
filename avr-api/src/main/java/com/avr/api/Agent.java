@@ -14,6 +14,7 @@ public final class Agent {
     private final List<Skill> skills;
     private final int maxSteps;
     private final CancellationToken cancellationToken;
+    private final String model;
 
     private Agent(Builder builder) {
         this.name = builder.name;
@@ -23,6 +24,7 @@ public final class Agent {
         this.skills = new ArrayList<Skill>(builder.skills);
         this.maxSteps = builder.maxSteps;
         this.cancellationToken = builder.cancellationToken;
+        this.model = builder.model;
     }
 
     public static Builder builder() {
@@ -47,6 +49,7 @@ public final class Agent {
                 .context(context)
                 .cancellationToken(cancellationToken)
                 .maxSteps(maxSteps);
+        request.model(model);
         for (Skill skill : skills) {
             request.skill(skill);
         }
@@ -60,8 +63,9 @@ public final class Agent {
         private Workspace workspace;
         private ExecutionContext context = ExecutionContext.empty();
         private final List<Skill> skills = new ArrayList<Skill>();
-        private int maxSteps = 20;
+        private int maxSteps = 30;
         private CancellationToken cancellationToken = CancellationToken.none();
+        private String model;
 
         public Builder name(String name) {
             this.name = Objects.requireNonNull(name, "name");
@@ -95,6 +99,11 @@ public final class Agent {
 
         public Builder cancellationToken(CancellationToken cancellationToken) {
             this.cancellationToken = Objects.requireNonNull(cancellationToken, "cancellationToken");
+            return this;
+        }
+
+        public Builder model(String model) {
+            this.model = model;
             return this;
         }
 

@@ -19,16 +19,18 @@ public final class OpenAiConfig {
     private final Duration timeout;
     private final Double temperature;
     private final Integer maxTokens;
+    private final int maxRetries;
     private final boolean stream;
     private final Map<String, String> headers;
 
     private OpenAiConfig(Builder builder) {
         this.endpoint = resolveEndpoint(builder.apiUrl);
-        this.apiKey = builder.apiKey;
+        this.apiKey = unresolvedPlaceholder(builder.apiKey, "apiKey");
         this.model = requireText(builder.model, "model");
         this.timeout = builder.timeout;
         this.temperature = builder.temperature;
         this.maxTokens = builder.maxTokens;
+        this.maxRetries = builder.maxRetries;
         this.stream = builder.stream;
         this.headers = Collections.unmodifiableMap(
                 new LinkedHashMap<String, String>(builder.headers));
@@ -72,6 +74,14 @@ public final class OpenAiConfig {
         if (value == null || value.trim().isEmpty()) {
             throw new IllegalArgumentException(name + " must not be blank");
         }
+        return unresolvedPlaceholder(value, name);
+    }
+
+    private static String unresolvedPlaceholder(String value, String name) {
+        if (value != null && value.contains("${")) {
+            throw new IllegalArgumentException(
+                    name + " contains an unresolved configuration placeholder");
+        }
         return value;
     }
 
@@ -83,6 +93,7 @@ public final class OpenAiConfig {
         private Duration timeout = Duration.ofMinutes(2);
         private Double temperature;
         private Integer maxTokens;
+        private int maxRetries = 2;
         private boolean stream = true;
         private final Map<String, String> headers = new LinkedHashMap<String, String>();
 
@@ -116,6 +127,15 @@ public final class OpenAiConfig {
                 throw new IllegalArgumentException("maxTokens must be positive");
             }
             this.maxTokens = maxTokens;
+            return this;
+        }
+
+        /** 仅用于模型端返回 429/5xx 时的额外尝试次数；设为 0 可关闭。 */
+        public Builder maxRetries(int maxRetries) {
+            if (maxRetries < 0 || maxRetries > 5) {
+                throw new IllegalArgumentException("maxRetries must be between 0 and 5");
+            }
+            this.maxRetries = maxRetries;
             return this;
         }
 

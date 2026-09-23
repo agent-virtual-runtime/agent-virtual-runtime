@@ -24,10 +24,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Consumer;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /** 调用 OpenAI 兼容 {@code POST /chat/completions} 接口的模型客户端。 */
 public final class OpenAiLlm implements Llm {
     private static final int MAX_ERROR_BODY_CHARS = 4_000;
+    private static final Logger LOGGER = Logger.getLogger(OpenAiLlm.class.getName());
     private static final TypeReference<LinkedHashMap<String, Object>> ARGUMENT_TYPE =
             new TypeReference<LinkedHashMap<String, Object>>() { };
 
@@ -63,23 +66,71 @@ public final class OpenAiLlm implements Llm {
             List<Message> messages,
             List<ToolDefinition> tools,
             Consumer<String> onTextDelta) {
+        return chat(null, messages, tools, onTextDelta);
+    }
+
+    @Override
+    public LlmResponse chat(
+            String model,
+            List<Message> messages,
+            List<ToolDefinition> tools,
+            Consumer<String> onTextDelta) {
+        return chat(model, messages, tools, onTextDelta, delta -> {
+        });
+    }
+
+    @Override
+    public LlmResponse chat(
+            String model,
+            List<Message> messages,
+            List<ToolDefinition> tools,
+            Consumer<String> onTextDelta,
+            Consumer<String> onReasoningDelta) {
+        return chat(model, messages, tools, false, onTextDelta, onReasoningDelta);
+    }
+
+    @Override
+    public LlmResponse chat(
+            String model,
+            List<Message> messages,
+            List<ToolDefinition> tools,
+            boolean webSearch,
+            Consumer<String> onTextDelta,
+            Consumer<String> onReasoningDelta) {
         Objects.requireNonNull(onTextDelta, "onTextDelta");
+        Objects.requireNonNull(onReasoningDelta, "onReasoningDelta");
+        if (webSearch) {
+            throw new LlmException(
+                    "native web search is not supported by the Chat Completions adapter; "
+                            + "use AVR runtime web.search or a Responses API Llm implementation");
+        }
         try {
             String requestBody = objectMapper.writeValueAsString(
-                    requestBody(messages, tools));
+                    requestBody(model, messages, tools));
             HttpRequest request = request(requestBody);
-            HttpResponse<InputStream> response = httpClient.send(
-                    request, HttpResponse.BodyHandlers.ofInputStream());
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw httpFailure(response);
-            }
-            try (InputStream responseBody = response.body()) {
-                // 兼容同一端点按配置返回 SSE 或普通 JSON 的两种响应形式。
-                if (isEventStream(response)) {
-                    return new OpenAiSseResponseParser(objectMapper)
-                            .parse(responseBody, onTextDelta);
+            for (int retry = 0; ; retry++) {
+                HttpResponse<InputStream> response = httpClient.send(
+                        request, HttpResponse.BodyHandlers.ofInputStream());
+                int status = response.statusCode();
+                if (status < 200 || status >= 300) {
+                    LlmException failure = httpFailure(response);
+                    if (!retryableStatus(status) || retry >= config.getMaxRetries()) {
+                        throw failure;
+                    }
+                    LOGGER.log(Level.WARNING,
+                            "Model endpoint returned HTTP {0}; retrying ({1}/{2})",
+                            new Object[]{status, retry + 1, config.getMaxRetries()});
+                    Thread.sleep(Math.min(2_000L, 250L << retry));
+                    continue;
                 }
-                return parseResponse(readBody(responseBody));
+                try (InputStream responseBody = response.body()) {
+                    // 一旦收到成功响应并开始解析 SSE，绝不重放请求或已输出的 delta。
+                    if (isEventStream(response)) {
+                        return new OpenAiSseResponseParser(objectMapper)
+                                .parse(responseBody, onTextDelta, onReasoningDelta);
+                    }
+                    return parseResponse(readBody(responseBody));
+                }
             }
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
@@ -89,11 +140,18 @@ public final class OpenAiLlm implements Llm {
         }
     }
 
+    private static boolean retryableStatus(int status) {
+        return status == 429 || status == 500 || status == 502
+                || status == 503 || status == 504;
+    }
+
     private ObjectNode requestBody(
+            String model,
             List<Message> messages,
             List<ToolDefinition> tools) {
         ObjectNode body = objectMapper.createObjectNode();
-        body.put("model", config.getModel());
+        body.put("model", model == null || model.trim().isEmpty()
+                ? config.getModel() : model);
         body.set("messages", messages(messages));
         if (!tools.isEmpty()) {
             body.set("tools", tools(tools));

@@ -14,7 +14,7 @@ The `central-release` Maven profile generates source and Javadoc JARs, signs art
 ## Each release
 
 1. Update the parent and all module POM versions, dependency examples, and changelog. Run `mvn clean verify`. Review the release changes and merge them to `main`.
-2. Create a new tag on that exact commit. For the next release, the proposed tag is `v1.0.1`. The existing `v1.0.0` tag points to older code and must not be moved or reused.
+2. Create a new `v<project.version>` tag on that exact commit. Never move or reuse an existing release tag; Maven Central releases are immutable.
 3. Push the new tag. The workflow checks that the tag matches the Maven version, verifies all modules, then runs the `central-release` profile to upload a bundle. Do not push the tag until the four Actions secrets are configured.
 4. Wait for the workflow to report a validated deployment. Open [Central Portal Deployments](https://central.sonatype.com/publishing/deployments), inspect the coordinates and artifacts, then click **Publish**. A validated upload is **not** yet available to users.
 5. Once published, confirm that the artifacts are available from Maven Central and announce the version. Maven Central releases are immutable; fixes require a new version.

@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="zh-CN" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="application-name" content="AVR Workspace">
+    <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#071a2b" media="(prefers-color-scheme: dark)">
+    <title>AVR Workspace</title>
+    <script>
+        (() => {
+            const choice = localStorage.getItem('avr.theme') || 'light';
+            const theme = choice === 'system'
+                ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+                : choice;
+            document.documentElement.setAttribute('data-bs-theme', theme);
+        })();
+    </script>
+    <link rel="stylesheet" href="/webjars/bootstrap/5.3.8/css/bootstrap.min.css">
+    <link rel="stylesheet" href="/webjars/bootstrap-icons/1.13.1/font/bootstrap-icons.min.css">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/brand/avr-icon-32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/brand/apple-touch-icon.png">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="stylesheet" href="/css/workbench.css?v=20260923-workspace1">
+</head>
+<body>
+<div class="workbench" id="workbench">
+    <header class="app-bar navbar border-bottom px-3">
+        <div class="d-flex align-items-center gap-3 min-w-0">
+            <button class="btn btn-sm btn-outline-secondary d-lg-none" id="toggle-navigation"
+                    type="button" aria-label="Toggle navigation"><i class="bi bi-list"></i></button>
+            <a class="navbar-brand d-flex align-items-center gap-2 mb-0" href="#">
+                <span class="brand-mark"><img src="/assets/brand/avr-icon-64.png" alt="" aria-hidden="true"></span>
+                <span><strong>AVR</strong> <span data-i18n="app.workspace">工作台</span></span>
+            </a>
+            <span class="vr d-none d-md-block"></span>
+            <div class="workspace-breadcrumb text-body-secondary d-none d-md-flex align-items-center gap-2">
+                <i class="bi bi-folder2"></i>
+                <span id="workspace-name" data-i18n="workspace.preparing">正在准备工作空间…</span>
+            </div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <span class="runtime-state d-none d-sm-flex align-items-center gap-2" id="runtime-state">
+                <span class="status-dot"></span><span data-i18n="runtime.ready">Agent Runtime 已就绪</span>
+            </span>
+            <div class="dropdown">
+                <button class="btn btn-sm icon-button" type="button"
+                        data-bs-toggle="dropdown" aria-expanded="false" aria-label="Language" data-i18n-title="language.switch">
+                    <i class="bi bi-globe2"></i><span id="locale-label" class="visually-hidden">中文</span>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><button class="dropdown-item locale-option" data-locale="zh-CN">中文</button></li>
+                    <li><button class="dropdown-item locale-option" data-locale="en-US">English</button></li>
+                </ul>
+            </div>
+            <div class="dropdown">
+                <button class="btn btn-sm icon-button" type="button"
+                        data-bs-toggle="dropdown" aria-expanded="false" aria-label="Theme" data-i18n-title="theme.switch">
+                    <i class="bi bi-circle-half" id="theme-icon"></i><span id="theme-label" class="visually-hidden"></span>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><button class="dropdown-item theme-option" data-theme="system"><i class="bi bi-laptop me-2"></i><span data-i18n="theme.system">跟随系统</span></button></li>
+                    <li><button class="dropdown-item theme-option" data-theme="light"><i class="bi bi-sun me-2"></i><span data-i18n="theme.light">浅色</span></button></li>
+                    <li><button class="dropdown-item theme-option" data-theme="dark"><i class="bi bi-moon-stars me-2"></i><span data-i18n="theme.dark">深色</span></button></li>
+                </ul>
+            </div>
+            <button class="btn btn-sm icon-button" id="toggle-resources" type="button"
+                    data-i18n-title="resource.toggle" title="切换资源栏"><i class="bi bi-layout-sidebar-inset-reverse"></i></button>
+        </div>
+    </header>
+
+    <div class="app-shell">
+        <nav class="navigation border-end" id="navigation">
+            <div class="p-3">
+                <button class="btn btn-primary btn-sm w-100 d-flex align-items-center justify-content-center gap-2" id="new-task" type="button">
+                    <i class="bi bi-plus-lg"></i><span data-i18n="nav.newTask">新任务</span>
+                </button>
+            </div>
+            <div class="nav-section">
+                <a class="nav-link active" href="#conversation"><i class="bi bi-chat-square-text"></i><span data-i18n="nav.conversation">对话</span></a>
+                <button class="nav-link" id="nav-workspace" type="button"><i class="bi bi-folder2-open"></i><span data-i18n="nav.workspace">工作区</span></button>
+            </div>
+            <div class="mt-auto p-3 small text-body-secondary">
+                <div class="d-flex align-items-center gap-2"><i class="bi bi-shield-check"></i><span data-i18n="nav.isolated">会话级虚拟工作空间</span></div>
+            </div>
+        </nav>
+
+        <main class="conversation" id="conversation">
+            <section class="message-stream" id="messages" aria-live="polite">
+                <div class="welcome" id="welcome">
+                    <div class="welcome-icon"><img src="/assets/brand/avr-icon-192.png" alt="" aria-hidden="true"></div>
+                    <h1 data-i18n="welcome.title">让 Agent 在完整工作空间中完成任务</h1>
+                    <p data-i18n="welcome.description">对话、调用工具、增量编辑文件并交付 Artifact。每个动作都运行在 AVR 标准 Workspace API 上。</p>
+                    <div class="suggestion-list">
+                        <button class="btn btn-outline-secondary suggestion" type="button" data-i18n="suggestion.website">创建包含 HTML、CSS、JavaScript 的产品主页并提交 Artifact</button>
+                        <button class="btn btn-outline-secondary suggestion" type="button" data-i18n="suggestion.notes">创建 notes.md，写入任务清单后追加验收项</button>
+                        <button class="btn btn-outline-secondary suggestion" type="button" data-i18n="suggestion.inspect">读取工作区文件，总结结构并提出下一步建议</button>
+                        <button class="btn btn-outline-secondary suggestion" type="button" data-i18n="suggestion.report">生成 Markdown 调研报告并保存到 /workspace/report.md</button>
+                    </div>
+                </div>
+            </section>
+
+            <section class="composer-wrap">
+                <section class="task-plan" id="task-plan" aria-labelledby="task-plan-title" hidden>
+                    <div class="task-plan-header">
+                        <span class="task-plan-title" id="task-plan-title">
+                            <i class="bi bi-list-check" aria-hidden="true"></i>
+                            <span data-i18n="plan.title">任务计划</span>
+                        </span>
+                        <span class="task-plan-progress" id="task-plan-progress"></span>
+                    </div>
+                    <div class="task-plan-list" id="task-plan-list" role="list"></div>
+                </section>
+                <div class="composer" id="composer" aria-busy="false">
+                    <label class="visually-hidden" for="prompt-input" data-i18n="composer.label">任务描述</label>
+                    <textarea class="form-control composer-input" id="prompt-input" maxlength="8000" rows="1"
+                              enterkeyhint="send" aria-describedby="composer-help composer-status" autocomplete="off"
+                              data-i18n-placeholder="composer.placeholder" placeholder="描述任务；Enter 执行，Shift+Enter 换行"></textarea>
+                    <div class="composer-toolbar">
+                        <div class="composer-controls">
+                            <div class="input-group input-group-sm composer-model" data-i18n-title="composer.modelHint" title="选择本次任务使用的模型">
+                                <span class="input-group-text" aria-hidden="true"><i class="bi bi-cpu"></i></span>
+                                <label class="visually-hidden" for="model-select" data-i18n="composer.model">模型</label>
+                                <select class="form-select" id="model-select" data-i18n-aria-label="composer.model" aria-label="模型"></select>
+                            </div>
+                            <div class="form-check form-switch web-search-switch">
+                                <input class="form-check-input" id="web-search-toggle" type="checkbox" role="switch"
+                                       aria-describedby="web-search-label">
+                                <label class="form-check-label" id="web-search-label" for="web-search-toggle"
+                                       data-i18n-title="composer.webSearchHint" title="允许模型联网搜索">
+                                    <i class="bi bi-globe2" aria-hidden="true"></i>
+                                    <span data-i18n="composer.webSearch">联网</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="composer-submit">
+                            <span class="composer-help text-body-secondary" id="composer-help" data-i18n="composer.shortcut">Enter 发送 · Shift+Enter 换行</span>
+                            <span class="visually-hidden" id="composer-status" aria-live="polite" data-i18n="runtime.ready">Agent Runtime 已就绪</span>
+                            <button class="btn btn-primary send-button" id="send" type="button" disabled
+                                    data-i18n-title="composer.run" title="运行任务" aria-keyshortcuts="Enter Control+Enter Meta+Enter">
+                                <span class="send-icon"><i class="bi bi-arrow-up" aria-hidden="true"></i></span>
+                                <span class="spinner-border spinner-border-sm send-spinner" aria-hidden="true"></span>
+                                <span class="visually-hidden" data-i18n="composer.run">运行任务</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <aside class="resource-dock border-start" id="resource-dock">
+            <div class="dock-header">
+                <div class="workspace-heading min-w-0">
+                    <span class="workspace-mark" aria-hidden="true"><i class="bi bi-hdd-stack"></i></span>
+                    <span class="min-w-0">
+                        <strong class="d-block text-truncate" data-i18n="workspace.title">虚拟工作空间</strong>
+                        <small class="d-block text-truncate" id="workspace-session-label" data-i18n="workspace.session">Session workspace</small>
+                    </span>
+                </div>
+                <div class="workspace-header-actions">
+                    <button class="workspace-icon-button" id="workspace-refresh" type="button" data-i18n-title="common.refresh" title="刷新"><i class="bi bi-arrow-clockwise"></i></button>
+                    <button class="workspace-icon-button" id="collapse-resources" type="button" data-i18n-title="resource.collapse" title="收起资源栏"><i class="bi bi-layout-sidebar-inset-reverse"></i></button>
+                </div>
+            </div>
+
+            <div class="workspace-tabs" role="tablist">
+                <button class="workspace-tab active" data-panel="files" type="button">
+                    <i class="bi bi-files"></i><span data-i18n="resource.files">文件</span><span class="workspace-count" id="file-count">0</span>
+                </button>
+                <button class="workspace-tab" data-panel="preview" type="button">
+                    <i class="bi bi-window"></i><span data-i18n="resource.preview">预览</span>
+                </button>
+            </div>
+
+            <section class="dock-panel" id="panel-files">
+                <div class="workspace-pathbar">
+                    <div class="workspace-breadcrumb" id="workspace-breadcrumb" aria-label="Workspace path"></div>
+                    <button class="workspace-icon-button" id="copy-workspace-path" type="button" data-i18n-title="file.copyPath" title="复制路径"><i class="bi bi-copy"></i></button>
+                </div>
+                <div class="workspace-tree-toolbar">
+                    <label class="workspace-search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input id="workspace-search" type="search" autocomplete="off" data-i18n-placeholder="workspace.search" placeholder="搜索文件和目录">
+                        <kbd id="workspace-search-shortcut">⌘K</kbd>
+                    </label>
+                    <button class="workspace-icon-button" id="collapse-tree" type="button" data-i18n-title="workspace.collapseAll" title="全部折叠"><i class="bi bi-arrows-collapse"></i></button>
+                    <button class="workspace-icon-button" id="workspace-menu" type="button" data-i18n-title="workspace.more" title="更多操作"><i class="bi bi-three-dots"></i></button>
+                </div>
+                <div class="workspace-tree-viewport">
+                    <div class="file-tree" id="file-tree" role="tree" aria-label="Workspace"></div>
+                </div>
+                <div class="workspace-selection d-none" id="workspace-selection">
+                    <div class="workspace-selection-main">
+                        <span class="workspace-selection-icon" id="workspace-selection-icon"><i class="bi bi-file-earmark"></i></span>
+                        <span class="min-w-0">
+                            <strong class="d-block text-truncate" id="workspace-selection-name"></strong>
+                            <small class="d-block text-truncate" id="workspace-selection-path"></small>
+                        </span>
+                        <button class="workspace-preview-action d-none" id="workspace-selection-preview" type="button" data-i18n-title="file.preview" title="浏览器预览"><i class="bi bi-play-fill"></i></button>
+                    </div>
+                    <div class="workspace-selection-meta" id="workspace-selection-meta"></div>
+                </div>
+                <div class="artifact-section border-top">
+                    <button class="section-title artifact-toggle" id="artifact-toggle" type="button" aria-expanded="false">
+                        <span><i class="bi bi-box-seam me-2"></i><span data-i18n="resource.artifacts">Artifacts</span></span>
+                        <span><span class="workspace-count" id="artifact-count">0</span><i class="bi bi-chevron-down ms-2"></i></span>
+                    </button>
+                    <div class="artifact-list d-none" id="artifact-list"></div>
+                </div>
+            </section>
+
+            <section class="dock-panel d-none" id="panel-preview">
+                <div class="preview-toolbar border-bottom">
+                    <div class="min-w-0">
+                        <div class="fw-semibold text-truncate" id="preview-name" data-i18n="preview.emptyTitle">预览</div>
+                        <div class="small text-body-secondary text-truncate" id="preview-path" data-i18n="preview.emptyHint">选择 HTML 文件或 Artifact</div>
+                    </div>
+                    <div class="btn-group btn-group-sm ms-auto">
+                        <button class="btn btn-outline-secondary" id="reload-preview" type="button" data-i18n-title="common.refresh" title="刷新"><i class="bi bi-arrow-clockwise"></i></button>
+                        <button class="btn btn-outline-secondary" id="open-preview" type="button" data-i18n-title="preview.openBrowser" title="在浏览器中打开"><i class="bi bi-box-arrow-up-right"></i></button>
+                    </div>
+                </div>
+                <div class="preview-empty" id="preview-empty"><i class="bi bi-window-stack"></i><p data-i18n="preview.emptyHint">选择 HTML 文件或 Artifact</p></div>
+                <iframe class="preview-frame d-none" id="preview-frame" title="HTML preview" sandbox="allow-scripts"></iframe>
+            </section>
+
+        </aside>
+    </div>
+</div>
+
+<div class="dropdown-menu shadow" id="file-context-menu" role="menu">
+    <h6 class="dropdown-header" data-i18n="workspace.contextOpen">打开</h6>
+    <button class="dropdown-item" data-file-action="open" data-file-only type="button"><i class="bi bi-folder2-open me-2"></i><span data-i18n="file.open">打开</span></button>
+    <button class="dropdown-item" data-file-action="preview" data-file-only type="button"><i class="bi bi-eye me-2"></i><span data-i18n="file.preview">浏览器预览</span></button>
+    <button class="dropdown-item" data-file-action="download" data-file-only type="button"><i class="bi bi-download me-2"></i><span data-i18n="file.download">下载文件</span></button>
+    <div class="dropdown-divider"></div>
+    <h6 class="dropdown-header" data-i18n="workspace.contextCreate">创建</h6>
+    <button class="dropdown-item" data-file-action="newFile" data-directory-only type="button"><i class="bi bi-file-earmark-plus me-2"></i><span data-i18n="file.new">新建文件</span></button>
+    <button class="dropdown-item" data-file-action="newDirectory" data-directory-only type="button"><i class="bi bi-folder-plus me-2"></i><span data-i18n="directory.new">新建目录</span></button>
+    <button class="dropdown-item" data-file-action="refresh" type="button"><i class="bi bi-arrow-clockwise me-2"></i><span data-i18n="common.refresh">刷新</span></button>
+    <div class="dropdown-divider"></div>
+    <h6 class="dropdown-header" data-i18n="workspace.contextManage">管理</h6>
+    <button class="dropdown-item" data-file-action="rename" data-root-hidden type="button"><i class="bi bi-pencil me-2"></i><span data-i18n="file.rename">重命名 / 移动</span></button>
+    <button class="dropdown-item" data-file-action="duplicate" data-root-hidden type="button"><i class="bi bi-files me-2"></i><span data-i18n="file.duplicate">创建副本</span></button>
+    <button class="dropdown-item" data-file-action="merge" data-directory-only data-root-hidden type="button"><i class="bi bi-intersect me-2"></i><span data-i18n="directory.merge">合并到…</span></button>
+    <button class="dropdown-item" data-file-action="copyPath" type="button"><i class="bi bi-clipboard me-2"></i><span data-i18n="file.copyPath">复制路径</span></button>
+    <div class="dropdown-divider"></div>
+    <button class="dropdown-item text-danger" data-file-action="delete" data-root-hidden type="button"><i class="bi bi-trash me-2"></i><span data-i18n="file.delete">删除</span></button>
+</div>
+
+<div class="modal fade" id="editor-modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="min-w-0"><h2 class="modal-title fs-6 text-truncate" id="editor-title">File</h2><div class="small text-body-secondary text-truncate" id="editor-path"></div></div>
+                <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-0"><textarea class="form-control code-editor" id="file-editor" spellcheck="false"></textarea></div>
+            <div class="modal-footer">
+                <button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal" data-i18n="common.cancel">取消</button>
+                <button class="btn btn-primary" id="save-file" type="button"><i class="bi bi-check2 me-1"></i><span data-i18n="common.save">保存</span></button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3" id="toast-container"></div>
+
+<script src="/webjars/marked/18.0.7/lib/marked.umd.js"></script>
+<script src="/webjars/dompurify/3.4.15/dist/purify.min.js"></script>
+<script src="/webjars/bootstrap/5.3.8/js/bootstrap.bundle.min.js"></script>
+<script src="/js/workbench.js?v=20260923-workspace1"></script>
+</body>
+</html>

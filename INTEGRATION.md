@@ -8,7 +8,7 @@ AVR 按能力拆分模块。发布到 Maven 仓库后，通常至少引入 Core�
 
 ```xml
 <properties>
-    <avr.version>1.0.1</avr.version>
+    <avr.version>1.0.2</avr.version>
 </properties>
 
 <dependencies>
@@ -37,7 +37,7 @@ AVR 按能力拆分模块。发布到 Maven 仓库后，通常至少引入 Core�
 | `avr-api` | 公共接口；已由其他 AVR 模块传递依赖 |
 | `avr-core` | Agent Loop、Tool 注册和内置文件工具 |
 | `avr-storage` | 单一依赖，包含内存、磁盘和对象存储 Workspace 实现 |
-| `avr-command` | 不启动系统进程的虚拟命令 |
+| `avr-command` | 可选的受控 HTTP 读取工具，不启动系统进程 |
 | `avr-model-openai` | OpenAI Chat Completions、SSE 和 Function Call |
 
 在 Maven 正式发布前，可以从源码执行 `mvn clean install` 安装到本地仓库。
@@ -53,9 +53,9 @@ import com.avr.api.Workspace;
 import com.avr.core.AgentLoop;
 import com.avr.core.DefaultToolRegistry;
 import com.avr.core.tool.CommitArtifactTool;
-import com.avr.core.tool.ListFilesTool;
-import com.avr.core.tool.ReadFileTool;
-import com.avr.core.tool.WriteFileTool;
+import com.avr.core.tool.FileOpTool;
+import com.avr.core.tool.DirectoryTool;
+import com.avr.core.tool.PlanTool;
 import com.avr.model.openai.OpenAiConfig;
 import com.avr.model.openai.OpenAiLlm;
 import com.avr.storage.MemoryWorkspace;
@@ -65,9 +65,9 @@ OpenAiConfig modelConfig = OpenAiConfig.fromYaml();
 OpenAiLlm llm = new OpenAiLlm(modelConfig);
 
 ToolRegistry tools = DefaultToolRegistry.builder()
-        .register(new ReadFileTool())
-        .register(new WriteFileTool())
-        .register(new ListFilesTool())
+        .register(new FileOpTool())
+        .register(new DirectoryTool())
+        .register(new PlanTool())
         .register(new CommitArtifactTool())
         .build();
 
@@ -83,6 +83,24 @@ Agent agent = Agent.builder()
 AgentResult result = agent.input(
         "读取 /inputs/data.txt，生成 /report/index.html，并提交为 Artifact");
 ```
+
+直接构建 `AgentRequest` 时可使用 `.model("模型 ID")` 覆盖默认模型。调用
+`.webSearch(true)` 时，运行时仅暴露标准 `web.search` Function Tool；应用需要提供
+`WebSearchProvider` Bean。`.webSearchMode(WebSearchMode.NATIVE)` 留给支持厂商托管搜索
+协议的 `Llm` 实现，Chat Completions 适配器不会伪造 hosted tool。
+
+```java
+@Bean
+WebSearchProvider webSearchProvider(CompanySearchClient client) {
+    return (request, context) -> client.search(
+            request.getQuery(), request.getMaxResults());
+}
+```
+
+Spring Boot 检测到该 Bean 后会自动注册 `web.search`。未注册 Provider 时，runtime 模式
+会在调用模型前报出明确配置错误，而不会让模型假装已经搜索。
+
+升级提示：旧版的 `ReadFileTool`、`WriteFileTool`、`ListFilesTool`、`CopyFileTool`、`MoveFileTool`、`DeleteFileTool` 和 `DelegateAgentTool` 已从源码移除。文件操作统一迁移到 `FileOpTool`（`file.op`，用 `op` 指定动作），多 Agent 协同使用 `AgentManageTool`。这是 Java API 的不兼容变更，已有接入方升级依赖时需要调整导入和注册代码。
 
 调用前可以由应用写入输入文件：
 
@@ -127,7 +145,7 @@ OpenAiConfig externalConfig = OpenAiConfig.fromYaml(
         Paths.get("/etc/avr/application.yml"));
 ```
 
-YAML 支持 `api-url`、`api-key`、`model`、`stream`、`temperature`、`max-tokens`、`timeout` 和 `headers`。`timeout` 接受 `500ms`、`30s`、`5m`、`2h` 或 ISO-8601 Duration。
+YAML 支持 `api-url`、`api-key`、`model`、`stream`、`temperature`、`max-tokens`、`timeout`、`max-retries` 和 `headers`。`timeout` 接受 `500ms`、`30s`、`5m`、`2h` 或 ISO-8601 Duration。`max-retries` 默认 2，仅对模型端返回 429/500/502/503/504 且尚未开始 SSE 输出的请求重试；设置为 0 可关闭。模型服务持续报错时仍会终止运行，不会无限重试。
 
 ### Java 初始化
 
@@ -164,7 +182,7 @@ OpenAiConfig config = OpenAiConfig.builder()
 4. 按 `tool_calls[index]` 聚合分片；
 5. 分别拼接 Function Call 的 `id`、`name` 和 `arguments`；
 6. 处理 `finish_reason` 和 `[DONE]`；
-7. 把文本增量发布为 `model.delta` 运行事件；
+7. 把正文增量发布为 `model.delta`；若服务端提供 `reasoning_content`，则独立发布 `model.reasoning_delta`，不混入最终正文；
 8. Function Call 完整后交给 Agent Loop 执行。
 
 不支持 SSE 的兼容服务可以使用：
@@ -214,6 +232,8 @@ ToolRegistry tools = DefaultToolRegistry.builder()
 
 模型返回的工具参数属于不可信输入。Tool 应校验参数，并通过 `ToolResult.failure(...)` 返回可供模型理解的错误。
 
+工具可在 `ToolDefinition` 指定默认 `displayName` 和 `ToolDisplayType`，供接入方 UI 展示。若同一工具的不同操作返回不同结构，可用 `ToolResult.success(content, rowCount, displayType)` 覆盖单次结果；支持 `TEXT`、`CODE`、`JSON`、`TABLE`、`TREE`、`MARKDOWN`。`rowCount` 是结果摘要中的业务行数，由工具给出，不要求前端猜测 JSON 内容。
+
 ## 5. 并发与串行 Tool
 
 Tool 默认使用 `PARALLEL`。同一模型响应中的相邻并行 Tool 会并发执行，但结果始终按照原始 `tool_calls` 顺序写回模型上下文。
@@ -237,6 +257,8 @@ ExecutorService toolExecutor = Executors.newFixedThreadPool(16);
 AgentLoopOptions options = AgentLoopOptions.builder()
         .toolExecutor(toolExecutor)
         .toolTimeout(Duration.ofMinutes(10))
+        .loopTimeout(Duration.ofMinutes(90))
+        .maxStepMultiplier(3)
         .maxEmptyResponses(1)
         .maxNoProgressRounds(5)
         .build();
@@ -247,6 +269,8 @@ AgentRuntime runtime = new AgentLoop(
         ToolPolicy.allowAll(),
         options);
 ```
+
+`AgentRequest.maxSteps` 或 Spring 的 `avr.agent.max-steps` 表示软上限。有新的成功 Tool 结果时，Loop 可自动延展到软上限乘以 `maxStepMultiplier`；重复的相同调用结果不算进展，连续无进展仍由 `maxNoProgressRounds` 提前熔断。整体运行时间由 `loopTimeout` 独立限制。
 
 线程池生命周期由接入方管理。应用关闭时应调用 `toolExecutor.shutdown()`。
 
@@ -316,7 +340,7 @@ Skill 是注入本次运行的可复用指令：
 Skill reportSkill = new Skill(
         "report-writing",
         "生成结构清晰、包含数据来源的 HTML 报告。",
-        Arrays.asList("file.read", "file.write", "artifact.commit"));
+        Arrays.asList("file.op", "artifact.commit"));
 
 Agent agent = Agent.builder()
         .name("report-agent")
@@ -371,14 +395,15 @@ public RuntimeEventListener auditListener(AuditService auditService) {
 
 - `run.created`、`run.preparing`：创建并准备运行；
 - `model.call`、`model.completed`：模型调用开始与完成；
-- `model.delta`：模型 SSE 文本增量；
+- `model.delta`：模型 SSE 正文增量；
+- `model.reasoning_delta`：可选的思考增量，仅在模型提供 `reasoning_content` 时产生；
 - `tool.started`：开始执行 Tool；
 - `tool.completed`、`tool.failed`：Tool 执行结果；
 - `run.completed`、`run.failed`、`run.cancelled`：运行终态。
 
 内置名称也可以通过 `RuntimeEventTypes` 常量引用，事件类型仍使用字符串，以便自定义 Runtime 扩展自己的事件。
 
-`RuntimeEvent` 是不可变对象，包含运行、Agent 和 Workspace 标识、有序序号、状态、发生时间、事件类型、说明以及结构化 `attributes`。模型完成事件会携带步骤、耗时、Tool Call 数和截断状态；Tool 事件会携带 Tool Call ID、Tool 名称、耗时和成功状态。
+`RuntimeEvent` 是不可变对象，包含运行、Agent 和 Workspace 标识、有序序号、状态、发生时间、事件类型、说明以及结构化 `attributes`。模型完成事件会携带步骤、耗时、Tool Call 数和截断状态；Tool 开始与结束事件共享 `toolCallId`，可在前端更新同一行。结束事件携带耗时、成功状态、`displayName`、`displayType`、可选 `rows` 和有界 `resultPreview`。Web/SSE 适配层应序列化 `occurredAt`，以保留开始和结束时间。
 
 监听器仅用于观察，抛出的运行时异常会被 Runtime 隔离，不会改变 Agent 结果。监听器默认在事件产生线程执行，因此数据库、网络或 MQ 等耗时操作应在监听器内部切换到应用管理的线程池，并自行处理队列容量和背压。
 

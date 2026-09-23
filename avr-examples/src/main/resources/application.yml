@@ -1,3 +1,6 @@
+server:
+  address: ${AVR_SERVER_ADDRESS:127.0.0.1}
+
 avr:
   llm:
     openai:
@@ -6,12 +9,14 @@ avr:
       model: ${AVR_MODEL:gpt-4.1-mini}
       stream: true
       temperature: 0.1
-      max-tokens: 12000
       timeout: 5m
+      max-retries: ${AVR_MODEL_MAX_RETRIES:2}
       headers: {}
   agent:
     name: stock-report-agent
-    max-steps: 12
+    max-steps: 30
+    max-step-multiplier: 3
+    loop-timeout: 90m
     tool-timeout: 2m
     skill-name: fundamental-stock-analysis
     instructions: |
@@ -26,3 +31,12 @@ avr:
     type: disk
     id: stock-report-example
     path: ${AVR_WORKSPACE_DIR:./avr-examples/target/stock-agent-workspace}
+  chat:
+    web-search-enabled: ${AVR_WEB_SEARCH_ENABLED:true}
+    models:
+      - id: ${AVR_MODEL:gpt-4.1-mini}
+        name: ${AVR_MODEL_DISPLAY_NAME:Primary model}
+        web-search: ${AVR_MODEL_WEB_SEARCH_MODE:runtime}
+    workspace:
+      type: ${AVR_CHAT_WORKSPACE_TYPE:disk}
+      root: ${AVR_CHAT_WORKSPACE_ROOT:./avr-examples/target/chat-workspaces}

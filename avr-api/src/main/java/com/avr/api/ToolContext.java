@@ -7,14 +7,20 @@ import lombok.Getter;
 public final class ToolContext {
     private final Workspace workspace;
     private final ExecutionContext executionContext;
+    private final String runId;
 
     public ToolContext(Workspace workspace) {
         this(workspace, ExecutionContext.empty());
     }
 
     public ToolContext(Workspace workspace, ExecutionContext executionContext) {
+        this(workspace, executionContext, "");
+    }
+
+    public ToolContext(Workspace workspace, ExecutionContext executionContext, String runId) {
         this.workspace = workspace;
         this.executionContext = executionContext;
+        this.runId = runId;
     }
 
 }

@@ -4,6 +4,17 @@ All notable changes will be documented in this file.
 
 ## Unreleased
 
+## 1.0.2 - 2026-09-23
+
+- Added domain-oriented file, directory and planning tools with range reads, search, append, insert, replace, move, merge and verification operations.
+- Added evidence-backed plan tracking so agents cannot report completion while required workspace changes remain unverified.
+- Added durable multi-turn sessions, resumable SSE event streams, bounded model retries and dynamic Agent Loop budgets with no-progress detection.
+- Added managed sub-agent tasks, native and runtime web-search modes, model selection and richer tool display metadata.
+- Upgraded the example application into a deployable Agent workbench with Markdown chat, reasoning and tool progress, a dedicated plan panel, file management and HTML preview.
+- Added a hierarchical virtual workspace explorer with file-type icons, context menus, drag-and-drop operations and automatic refresh after workspace mutations.
+
+## 1.0.1 - 2026-09-20
+
 - Prepared version `1.0.1` and a tag-triggered Maven Central upload with manual Portal publishing.
 - Changed all Maven coordinates from `org.agentvirtualruntime` to `io.github.agent-virtual-runtime`.
 - Consolidated `avr-storage-memory`, `avr-storage-disk` and `avr-storage-object` into the single `avr-storage` module.

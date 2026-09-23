@@ -2,6 +2,7 @@ package com.avr.storage;
 
 import com.avr.api.Artifact;
 import com.avr.api.Workspace;
+import com.avr.api.WorkspaceEntry;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -14,6 +15,7 @@ import java.util.UUID;
 
 /** 基于通用对象存储的 UTF-8 虚拟工作空间。 */
 public final class ObjectWorkspace implements Workspace {
+    private static final String DIRECTORY_MARKER = ".avr-directory";
     private final String id;
     private final ObjectStore store;
     private final String prefix;
@@ -34,7 +36,7 @@ public final class ObjectWorkspace implements Workspace {
         String normalized = normalize(directory, true);
         List<String> result = new ArrayList<String>();
         for (String key : store.list(prefix + strip(normalized))) {
-            if (key.startsWith(prefix)) {
+            if (key.startsWith(prefix) && !key.endsWith("/" + DIRECTORY_MARKER)) {
                 String virtualPath = "/" + key.substring(prefix.length());
                 if (!ArtifactPersistence.isInternalPath(virtualPath)) {
                     result.add(virtualPath);
@@ -43,6 +45,52 @@ public final class ObjectWorkspace implements Workspace {
         }
         Collections.sort(result);
         return Collections.unmodifiableList(result);
+    }
+
+    @Override
+    public synchronized List<WorkspaceEntry> entries(String directory) {
+        String normalized = normalize(directory, true);
+        String keyPrefix = prefix + strip(normalized);
+        Map<String, WorkspaceEntry> result = new LinkedHashMap<String, WorkspaceEntry>();
+        for (String objectKey : store.list(keyPrefix)) {
+            if (!objectKey.startsWith(prefix)) {
+                continue;
+            }
+            String virtual = "/" + objectKey.substring(prefix.length());
+            if (ArtifactPersistence.isInternalPath(virtual)) {
+                continue;
+            }
+            String relative = virtual.substring(normalized.length());
+            if (relative.isEmpty()) {
+                continue;
+            }
+            int slash = relative.indexOf('/');
+            if (slash >= 0) {
+                String child = normalized.substring(0, normalized.length() - 1)
+                        + "/" + relative.substring(0, slash);
+                result.put(child, new WorkspaceEntry(
+                        child, WorkspaceEntry.Type.DIRECTORY, 0));
+            } else if (!DIRECTORY_MARKER.equals(relative)) {
+                long size = store.get(objectKey).map(value -> (long) value.length).orElse(0L);
+                result.put(virtual, new WorkspaceEntry(
+                        virtual, WorkspaceEntry.Type.FILE, size));
+            }
+        }
+        List<WorkspaceEntry> entries = new ArrayList<WorkspaceEntry>(result.values());
+        entries.sort(java.util.Comparator.comparing(WorkspaceEntry::getPath));
+        return Collections.unmodifiableList(entries);
+    }
+
+    @Override
+    public synchronized void createDirectory(String path) {
+        String normalized = normalize(path, true);
+        store.put(prefix + strip(normalized) + DIRECTORY_MARKER, new byte[0]);
+    }
+
+    @Override
+    public synchronized boolean directoryExists(String path) {
+        String normalized = normalize(path, true);
+        return !store.list(prefix + strip(normalized)).isEmpty();
     }
 
     @Override
@@ -61,12 +109,66 @@ public final class ObjectWorkspace implements Workspace {
     }
 
     @Override
+    public synchronized void appendText(String path, String content) {
+        Workspace.super.appendText(path, content);
+    }
+
+    @Override
+    public synchronized int replaceText(
+            String path, String oldText, String newText, boolean replaceAll) {
+        return Workspace.super.replaceText(path, oldText, newText, replaceAll);
+    }
+
+    @Override
     public synchronized void delete(String path) {
         String normalized = normalize(path, false);
         if (!exists(normalized)) {
             throw new IllegalArgumentException("file does not exist: " + normalized);
         }
         store.delete(key(normalized));
+    }
+
+    @Override
+    public synchronized void deleteDirectory(String path, boolean recursive) {
+        String normalized = normalize(path, true);
+        if ("/".equals(normalized)) {
+            throw new IllegalArgumentException("workspace root cannot be deleted");
+        }
+        List<String> keys = new ArrayList<String>(store.list(prefix + strip(normalized)));
+        if (keys.isEmpty()) {
+            throw new IllegalArgumentException("directory does not exist: " + path);
+        }
+        String ownMarker = prefix + strip(normalized) + DIRECTORY_MARKER;
+        boolean hasContent = keys.stream().anyMatch(value -> !value.equals(ownMarker));
+        if (hasContent && !recursive) {
+            throw new IllegalStateException("directory is not empty: " + path);
+        }
+        for (String value : keys) {
+            store.delete(value);
+        }
+    }
+
+    @Override
+    public synchronized void copyDirectory(String source, String target, boolean merge) {
+        String from = normalize(source, true);
+        String to = normalize(target, true);
+        if (from.equals(to) || to.startsWith(from)) {
+            throw new IllegalArgumentException(
+                    "target directory cannot be inside source: " + target);
+        }
+        if (!directoryExists(from)) {
+            throw new IllegalArgumentException("directory does not exist: " + source);
+        }
+        if (directoryExists(to) && !merge) {
+            throw new IllegalArgumentException("target directory already exists: " + target);
+        }
+        createDirectory(to);
+        for (String sourceKey : new ArrayList<String>(store.list(prefix + strip(from)))) {
+            byte[] value = store.get(sourceKey).orElseThrow(() ->
+                    new IllegalStateException("object disappeared: " + sourceKey));
+            String relative = sourceKey.substring((prefix + strip(from)).length());
+            store.put(prefix + strip(to) + relative, value);
+        }
     }
 
     @Override

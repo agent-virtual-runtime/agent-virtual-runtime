@@ -21,6 +21,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -142,8 +144,94 @@ class OpenAiLlmTest {
             assertEquals("file.read", response.getToolCalls().get(0).getName());
             assertEquals("/input.txt",
                     response.getToolCalls().get(0).requireString("path"));
-            assertTrue(new ObjectMapper().readTree(requestBody.get())
-                    .path("stream").asBoolean());
+            JsonNode request = new ObjectMapper().readTree(requestBody.get());
+            assertTrue(request.path("stream").asBoolean());
+            assertFalse(request.has("max_tokens"),
+                    "Unconfigured output limits must be left to the model service");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void retriesTemporaryHttp500BeforeAnySseOutput() throws Exception {
+        AtomicInteger requests = new AtomicInteger();
+        HttpServer server = createServer();
+        if (server == null) {
+            return;
+        }
+        server.createContext("/v1/chat/completions", exchange -> {
+            int status = requests.incrementAndGet() <= 2 ? 500 : 200;
+            byte[] bytes = (status == 500
+                    ? "{\"error\":{\"message\":\"internal server error\"}}"
+                    : finalResponse()).getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(status, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            OpenAiLlm llm = new OpenAiLlm(OpenAiConfig.builder()
+                    .apiUrl("http://127.0.0.1:" + server.getAddress().getPort() + "/v1")
+                    .model("test-model")
+                    .stream(false)
+                    .build());
+            LlmResponse result = llm.chat(
+                    Collections.singletonList(Message.user("hello")),
+                    Collections.emptyList());
+            assertEquals("finished", result.getText());
+            assertEquals(3, requests.get());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void rejectsNativeWebSearchForChatCompletionsBeforeSendingRequest() {
+        OpenAiLlm llm = new OpenAiLlm(OpenAiConfig.builder()
+                .apiUrl("http://127.0.0.1:1/v1")
+                .model("test-model")
+                .stream(false)
+                .build());
+
+        LlmException error = assertThrows(LlmException.class, () -> llm.chat(
+                "test-model",
+                Collections.singletonList(Message.user("latest news")),
+                Collections.singletonList(new ToolDefinition(
+                        "file.op", "Operate files", "{\"type\":\"object\"}")),
+                true, delta -> { }, delta -> { }));
+
+        assertTrue(error.getMessage().contains("Responses API"));
+    }
+
+    @Test
+    void doesNotRetryNonTransientHttp400() throws Exception {
+        AtomicInteger requests = new AtomicInteger();
+        HttpServer server = createServer();
+        if (server == null) {
+            return;
+        }
+        server.createContext("/v1/chat/completions", exchange -> {
+            requests.incrementAndGet();
+            byte[] bytes = "bad request".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(400, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            OpenAiLlm llm = new OpenAiLlm(OpenAiConfig.builder()
+                    .apiUrl("http://127.0.0.1:" + server.getAddress().getPort() + "/v1")
+                    .model("test-model")
+                    .build());
+            LlmException failure = assertThrows(LlmException.class,
+                    () -> llm.chat(Collections.singletonList(Message.user("hello")),
+                            Collections.emptyList()));
+            assertTrue(failure.getMessage().contains("HTTP 400"));
+            assertEquals(1, requests.get());
         } finally {
             server.stop(0);
         }

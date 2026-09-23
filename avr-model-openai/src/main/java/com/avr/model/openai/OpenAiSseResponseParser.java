@@ -17,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.UUID;
 import java.util.function.Consumer;
 
 /** 解析 OpenAI 兼容的 Chat Completions SSE 响应。 */
@@ -36,6 +37,14 @@ final class OpenAiSseResponseParser {
     }
 
     LlmResponse parse(InputStream input, Consumer<String> onTextDelta) throws IOException {
+        return parse(input, onTextDelta, delta -> {
+        });
+    }
+
+    LlmResponse parse(
+            InputStream input,
+            Consumer<String> onTextDelta,
+            Consumer<String> onReasoningDelta) throws IOException {
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(input, StandardCharsets.UTF_8))) {
             StringBuilder eventData = new StringBuilder();
@@ -43,7 +52,7 @@ final class OpenAiSseResponseParser {
             boolean done = false;
             while (!done && (line = reader.readLine()) != null) {
                 if (line.isEmpty()) {
-                    done = processEvent(eventData, onTextDelta);
+                    done = processEvent(eventData, onTextDelta, onReasoningDelta);
                     eventData.setLength(0);
                 } else if (line.startsWith("data:")) {
                     if (eventData.length() > 0) {
@@ -54,7 +63,7 @@ final class OpenAiSseResponseParser {
                 }
             }
             if (!done && eventData.length() > 0) {
-                processEvent(eventData, onTextDelta);
+                processEvent(eventData, onTextDelta, onReasoningDelta);
             }
         }
         return LlmResponse.of(
@@ -63,7 +72,8 @@ final class OpenAiSseResponseParser {
 
     private boolean processEvent(
             StringBuilder eventData,
-            Consumer<String> onTextDelta) {
+            Consumer<String> onTextDelta,
+            Consumer<String> onReasoningDelta) {
         if (eventData.length() == 0) {
             return false;
         }
@@ -86,6 +96,10 @@ final class OpenAiSseResponseParser {
                     continue;
                 }
                 appendText(delta.path("content"), onTextDelta);
+                JsonNode reasoning = delta.path("reasoning_content");
+                if (reasoning.isTextual() && !reasoning.asText().isEmpty()) {
+                    onReasoningDelta.accept(reasoning.asText());
+                }
                 appendToolCalls(delta.path("tool_calls"));
             }
             return false;
@@ -148,7 +162,8 @@ final class OpenAiSseResponseParser {
 
         private ToolCall complete(int index) {
             if (id == null || id.trim().isEmpty()) {
-                throw new LlmException("model SSE tool call " + index + " is missing id");
+                // 部分兼容接口在流式工具调用中省略 id；回填消息时使用本地生成的稳定 ID。
+                id = "call_avr_" + UUID.randomUUID().toString().replace("-", "");
             }
             if (name.length() == 0) {
                 throw new LlmException("model SSE tool call " + index + " is missing name");

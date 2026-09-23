@@ -6,8 +6,18 @@ import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class OpenAiConfigYamlLoaderTest {
+    @Test
+    void rejectsUnresolvedApiKeyPlaceholder() {
+        assertThrows(IllegalArgumentException.class,
+                () -> OpenAiConfig.builder()
+                        .model("test-model")
+                        .apiKey("${OPENAI_API_KEY}")
+                        .build());
+    }
+
     @Test
     void loadsYamlAndResolvesPlaceholders() {
         String previousKey = System.getProperty("test.api.key");
@@ -26,6 +36,7 @@ class OpenAiConfigYamlLoaderTest {
             assertEquals(Duration.ofSeconds(90), config.getTimeout());
             assertEquals(0.25, config.getTemperature());
             assertEquals(2048, config.getMaxTokens());
+            assertEquals(2, config.getMaxRetries());
             assertFalse(config.isStream());
             assertEquals("default-tenant", config.getHeaders().get("X-Test-Tenant"));
         } finally {

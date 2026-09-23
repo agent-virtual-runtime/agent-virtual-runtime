@@ -1,0 +1,22 @@
+{
+  "name": "AVR Workspace",
+  "short_name": "AVR",
+  "description": "Agent Virtual Runtime workspace",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#003461",
+  "icons": [
+    {
+      "src": "/assets/brand/avr-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/assets/brand/avr-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

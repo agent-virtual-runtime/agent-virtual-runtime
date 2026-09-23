@@ -19,7 +19,7 @@ Agent Virtual Runtime is a Java 11+ framework that gives an AI agent a virtual w
 - request-scoped Skill instruction injection and a Skill registry;
 - memory, host-disk and generic object-store-backed virtual workspaces;
 - file read, write, list, copy, move and delete operations;
-- virtual `pwd`, `ls`, `cat`, `grep`, `wc` and policy-controlled `curl` commands with no OS process execution;
+- file and directory operations exposed directly as Function Calls, plus optional policy-controlled `http.get` with no OS process execution;
 - immutable HTML/CSS/JS artifact snapshots with a declared entrypoint and persistent metadata on disk and object storage;
 - named sub-agent delegation over a shared virtual workspace;
 - cooperative cancellation for synchronous and asynchronous runs;
@@ -44,11 +44,10 @@ mvn clean verify
 Workspace workspace = new MemoryWorkspace("any-id-chosen-by-your-application");
 
 ToolRegistry tools = DefaultToolRegistry.builder()
-        .register(new ReadFileTool())
-        .register(new WriteFileTool())
-        .register(new ListFilesTool())
+        .register(new FileOpTool())
+        .register(new DirectoryTool())
+        .register(new PlanTool())
         .register(new CommitArtifactTool())
-        .register(new VirtualCommandTool())
         .build();
 
 RuntimeEventListener loggingListener = event ->
@@ -66,7 +65,7 @@ Agent agent = Agent.builder()
         .runtime(runtime)
         .workspace(workspace)
         .skill(new Skill("report-writing", "Write evidence-based HTML reports.",
-                Collections.singletonList("file.write")))
+                Collections.singletonList("file.op")))
         .build());
 
 AgentResult result = agent.input("Read /inputs/data.txt and create /report/index.html");
@@ -77,6 +76,13 @@ AgentResult result = agent.input("Read /inputs/data.txt and create /report/index
 ## OpenAI-compatible model
 
 The `avr-model-openai` module implements the Chat Completions protocol, including SSE streaming, function tools, assistant `tool_calls`, and tool-result messages:
+
+`AgentRequest.builder().webSearch(true)` enables AVR's `web.search` Function Tool. Applications
+provide a `WebSearchProvider`, so the runtime can use a public search API or an internal company
+service without leaking a vendor-specific schema into the model request. Use
+`.webSearchMode(WebSearchMode.NATIVE)` only with an `Llm` implementation that supports a hosted
+search protocol such as OpenAI Responses. `OpenAiLlm` is deliberately a Chat Completions adapter
+and rejects native search before sending a malformed request.
 
 ```java
 OpenAiConfig modelConfig = OpenAiConfig.builder()
@@ -104,7 +110,9 @@ AgentRuntime runtime = new AgentLoop(llm, tools);
 5. Every result is appended as a `tool` message with the matching `tool_call_id`, in original call order.
 6. AVR calls the model again until it returns a final answer or a loop guard stops the run.
 
-When one model turn contains multiple tool calls, AVR executes adjacent `PARALLEL` tools concurrently and always appends their results to model history in the original call order. Tools that mutate ordered state declare `SEQUENTIAL` and act as barriers. Configure the executor, timeout, empty-response retry and no-progress fuse through `AgentLoopOptions`.
+When one model turn contains multiple tool calls, AVR executes adjacent `PARALLEL` tools concurrently and always appends their results to model history in the original call order. Tools that mutate ordered state declare `SEQUENTIAL` and act as barriers.
+
+`maxSteps` is a soft budget rather than a mechanical stopping point. While tool rounds keep producing new successful results, the loop may extend up to `maxSteps × maxStepMultiplier`. Repeating the same tool arguments and result does not count as progress, the no-progress fuse still stops stalled runs early, and `loopTimeout` provides an independent wall-clock budget. Configure these guards, the executor, tool timeout and empty-response retry through `AgentLoopOptions`.
 
 For cancellation, create a `CancellationSource`, pass its token to the Agent builder, and call `cancel()` from the hosting application. The loop checks cancellation before model and tool calls.
 
@@ -121,15 +129,28 @@ Workspace disk = new DiskWorkspace("opaque-id", Paths.get("/mounted/avr/work-42"
 
 For centralized deployments, use `MemoryWorkspaceProvider` or `DiskWorkspaceProvider`, or implement the business-neutral `WorkspaceProvider` SPI. The disk provider accepts an application-owned path resolver, so AVR does not define any user or tenant directory scheme.
 
+The standard capability set exposes one `file.op` tool for file lifecycle and content operations, one `directory.manage` tool for directory lifecycle, and `plan.manage` for create/revise/update/check. File operations include bounded range reads, search, write, append, insert, replace, copy, move, and delete. Line ranges are 1-based and inclusive. `DiskWorkspace` streams append, range-read, and search operations instead of loading a complete report into the model context. Applications can opt in to `AgentRequest.planMode(true)`: completion then requires a checked plan whose steps reference successful tool calls and may verify output paths, minimum file size, aggregate directory size, and removed source paths. A pending step can be revised when its verification target was planned incorrectly. Business-specific completion rules can additionally use `completionCheck`.
+
 Applications can implement `Workspace` directly with an internal storage client. `ObjectWorkspace` is an optional convenience implementation backed by the small `ObjectStore` adapter; it does not require or impose an S3, OSS, COS or MinIO SDK.
 
 `MemoryWorkspace` retains files and artifacts only for the lifetime of that Java object. `DiskWorkspace` persists both files and committed artifact snapshots below its configured root, while `ObjectWorkspace` persists them below its configured object-key prefix. Recreating a persistent Workspace with the same root or prefix restores `artifacts()`. The internal `/.avr` namespace is reserved for AVR metadata and is never exposed to the agent.
 
-The optional `curl` virtual command only works when `VirtualCommandTool` receives a `VirtualHttpClient`. This lets the application enforce host allowlists, credentials, timeouts and audit rules without exposing the host shell.
+`http.get` is optional and is registered only when the application provides a `VirtualHttpClient`. The application must enforce host allowlists, credentials, timeouts and audit rules; AVR does not expose the host shell. File listing, reading, searching and editing use the file/directory Function Calls rather than command aliases.
+
+## Multi-agent coordination
+
+`AgentTaskManager` registers application-defined specialist runtimes and manages task creation, asynchronous execution, result collection and cooperative cancellation. `AgentManageTool` exposes `list_agents`, `list_tasks`, `create`, `execute`, `result`, and `cancel` to the parent Agent while passing through the current Workspace and ExecutionContext. AVR does not impose an organization structure, identity scheme or model choice.
+
+```java
+AgentTaskManager manager = new AgentTaskManager()
+        .register("research-agent", "research and fact checking", researchRuntime)
+        .register("writer-agent", "long-form report writing", writerRuntime);
+Tool agentTool = new AgentManageTool(manager);
+```
 
 ## Non-invasive runtime observation
 
-AVR does not start an HTTP server or add monitoring methods to `Agent`. Register one or more `RuntimeEventListener` instances when constructing `AgentLoop`; Spring Boot applications only need to declare listener beans and the Starter collects them automatically. Events contain the run, agent and workspace identifiers, ordered sequence, state, type, detail and structured attributes. Listener failures are isolated from Agent execution.
+AVR does not start an HTTP server or add monitoring methods to `Agent`. Register one or more `RuntimeEventListener` instances when constructing `AgentLoop`; Spring Boot applications only need to declare listener beans and the Starter collects them automatically. Events contain the run, agent and workspace identifiers, ordered sequence, state, type, detail and structured attributes. Tool events additionally carry display metadata, a bounded argument summary, duration, success state, and a bounded result preview for custom front-end rendering. Listener failures are isolated from Agent execution.
 
 `InMemoryRunTracker` is an optional bounded listener that projects events into `RunSnapshot` values and retains limited event history. Applications can instead implement `RuntimeEventListener` to publish to logs, metrics, OpenTelemetry, a database, MQ, SSE or WebSocket. HTTP controllers, authentication, quotas and artifact delivery remain the hosting application's responsibility.
 
@@ -138,7 +159,7 @@ AVR does not start an HTTP server or add monitoring methods to `Agent`. Register
 - `avr-api`: public contracts and SPIs.
 - `avr-core`: agent loop, tool registry and built-in tools.
 - `avr-storage`: all built-in Workspace implementations in one dependency and package.
-- `avr-command`: safe virtual command vocabulary.
+- `avr-command`: optional application-controlled HTTP retrieval tool.
 - `avr-model-openai`: OpenAI-compatible Chat Completions client with native tool calling.
 - `avr-spring-boot-starter`: Spring Boot configuration binding, listener discovery and Agent auto-configuration.
 - `avr-examples`: runnable end-to-end example.

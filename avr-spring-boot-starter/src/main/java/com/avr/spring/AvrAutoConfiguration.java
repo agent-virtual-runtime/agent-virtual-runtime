@@ -9,17 +9,17 @@ import com.avr.api.Tool;
 import com.avr.api.ToolPolicy;
 import com.avr.api.ToolRegistry;
 import com.avr.api.Workspace;
-import com.avr.command.VirtualCommandTool;
+import com.avr.api.WebSearchProvider;
+import com.avr.command.HttpGetTool;
+import com.avr.command.VirtualHttpClient;
+import com.avr.command.WebSearchTool;
 import com.avr.core.AgentLoop;
 import com.avr.core.AgentLoopOptions;
 import com.avr.core.DefaultToolRegistry;
 import com.avr.core.tool.CommitArtifactTool;
-import com.avr.core.tool.CopyFileTool;
-import com.avr.core.tool.DeleteFileTool;
-import com.avr.core.tool.ListFilesTool;
-import com.avr.core.tool.MoveFileTool;
-import com.avr.core.tool.ReadFileTool;
-import com.avr.core.tool.WriteFileTool;
+import com.avr.core.tool.DirectoryTool;
+import com.avr.core.tool.FileOpTool;
+import com.avr.core.tool.PlanTool;
 import com.avr.model.openai.OpenAiConfig;
 import com.avr.model.openai.OpenAiLlm;
 import com.avr.storage.DiskWorkspace;
@@ -57,6 +57,7 @@ public class AvrAutoConfiguration {
                 .apiUrl(properties.getApiUrl())
                 .model(properties.getModel())
                 .stream(properties.isStream())
+                .maxRetries(properties.getMaxRetries())
                 .timeout(properties.getTimeout());
         if (hasText(properties.getApiKey())) {
             builder.apiKey(properties.getApiKey());
@@ -86,39 +87,21 @@ public class AvrAutoConfiguration {
     }
 
     @Bean
-    @ConditionalOnMissingBean(name = "avrReadFileTool")
-    public Tool avrReadFileTool() {
-        return new ReadFileTool();
+    @ConditionalOnMissingBean(name = "avrFileOpTool")
+    public Tool avrFileOpTool() {
+        return new FileOpTool();
     }
 
     @Bean
-    @ConditionalOnMissingBean(name = "avrWriteFileTool")
-    public Tool avrWriteFileTool() {
-        return new WriteFileTool();
+    @ConditionalOnMissingBean(name = "avrPlanTool")
+    public Tool avrPlanTool() {
+        return new PlanTool();
     }
 
     @Bean
-    @ConditionalOnMissingBean(name = "avrListFilesTool")
-    public Tool avrListFilesTool() {
-        return new ListFilesTool();
-    }
-
-    @Bean
-    @ConditionalOnMissingBean(name = "avrCopyFileTool")
-    public Tool avrCopyFileTool() {
-        return new CopyFileTool();
-    }
-
-    @Bean
-    @ConditionalOnMissingBean(name = "avrMoveFileTool")
-    public Tool avrMoveFileTool() {
-        return new MoveFileTool();
-    }
-
-    @Bean
-    @ConditionalOnMissingBean(name = "avrDeleteFileTool")
-    public Tool avrDeleteFileTool() {
-        return new DeleteFileTool();
+    @ConditionalOnMissingBean(name = "avrDirectoryTool")
+    public Tool avrDirectoryTool() {
+        return new DirectoryTool();
     }
 
     @Bean
@@ -128,9 +111,18 @@ public class AvrAutoConfiguration {
     }
 
     @Bean
-    @ConditionalOnMissingBean(name = "avrVirtualCommandTool")
-    public Tool avrVirtualCommandTool() {
-        return new VirtualCommandTool();
+    @ConditionalOnBean(VirtualHttpClient.class)
+    @ConditionalOnMissingBean(name = "avrHttpGetTool")
+    public Tool avrHttpGetTool(VirtualHttpClient httpClient) {
+        return new HttpGetTool(httpClient);
+    }
+
+    /** 应用提供搜索实现后，自动将其注册为普通 Function Tool。 */
+    @Bean
+    @ConditionalOnBean(WebSearchProvider.class)
+    @ConditionalOnMissingBean(name = "avrWebSearchTool")
+    public Tool avrWebSearchTool(WebSearchProvider provider) {
+        return new WebSearchTool(provider);
     }
 
     @Bean
@@ -146,6 +138,8 @@ public class AvrAutoConfiguration {
     public AgentLoopOptions agentLoopOptions(AvrAgentProperties properties) {
         return AgentLoopOptions.builder()
                 .toolTimeout(properties.getToolTimeout())
+                .loopTimeout(properties.getLoopTimeout())
+                .maxStepMultiplier(properties.getMaxStepMultiplier())
                 .maxEmptyResponses(properties.getMaxEmptyResponses())
                 .maxNoProgressRounds(properties.getMaxNoProgressRounds())
                 .build();

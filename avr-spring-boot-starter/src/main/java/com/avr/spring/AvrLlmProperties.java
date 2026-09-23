@@ -25,6 +25,8 @@ public class AvrLlmProperties {
     private Double temperature;
     /** 单次响应的最大 Token 数。 */
     private Integer maxTokens;
+    /** 模型端返回 429/500/502/503/504 时，最多额外重试的次数。 */
+    private int maxRetries = 2;
     /** 单次模型请求超时时间。 */
     private Duration timeout = Duration.ofMinutes(2);
     /** 发送给兼容服务的附加请求头。 */

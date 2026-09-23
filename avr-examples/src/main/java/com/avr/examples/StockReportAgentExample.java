@@ -7,14 +7,10 @@ import com.avr.api.Skill;
 import com.avr.api.ToolRegistry;
 import com.avr.api.Workspace;
 import com.avr.api.RuntimeEvent;
-import com.avr.command.VirtualCommandTool;
 import com.avr.core.AgentLoop;
 import com.avr.core.AgentLoopOptions;
 import com.avr.core.DefaultToolRegistry;
-import com.avr.core.tool.CommitArtifactTool;
-import com.avr.core.tool.ListFilesTool;
-import com.avr.core.tool.ReadFileTool;
-import com.avr.core.tool.WriteFileTool;
+import com.avr.core.tool.WorkspaceTools;
 import com.avr.model.openai.OpenAiConfig;
 import com.avr.model.openai.OpenAiLlm;
 import com.avr.storage.DiskWorkspace;
@@ -42,13 +38,9 @@ public final class StockReportAgentExample {
                 "stock-report-example", workspaceDirectory);
         workspace.writeText(INPUT_FILE, sampleStockData());
 
-        ToolRegistry tools = DefaultToolRegistry.builder()
-                .register(new ReadFileTool())
-                .register(new WriteFileTool())
-                .register(new ListFilesTool())
-                .register(new CommitArtifactTool())
-                .register(new VirtualCommandTool())
-                .build();
+        DefaultToolRegistry.Builder toolBuilder = DefaultToolRegistry.builder();
+        WorkspaceTools.defaults().forEach(toolBuilder::register);
+        ToolRegistry tools = toolBuilder.build();
 
         AgentLoopOptions loopOptions = AgentLoopOptions.builder()
                 .toolTimeout(Duration.ofMinutes(2))
@@ -69,7 +61,7 @@ public final class StockReportAgentExample {
                 .runtime(runtime)
                 .workspace(workspace)
                 .skill(financialAnalysisSkill())
-                .maxSteps(12)
+                .maxSteps(30)
                 .build();
 
         System.out.println("Using model: " + modelConfig.getModel());
@@ -115,9 +107,7 @@ public final class StockReportAgentExample {
                 "fundamental-stock-analysis",
                 instructions,
                 Arrays.asList(
-                        "file.read",
-                        "file.write",
-                        "file.list",
+                        "file.op",
                         "artifact.commit"));
     }
 
