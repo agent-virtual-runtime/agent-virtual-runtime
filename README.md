@@ -4,9 +4,23 @@
 
 Maintainers: see [Maven Central release guide](RELEASING.md).
 
+Documentation: [architecture and project scope](ARCHITECTURE.md) · [integration guide](INTEGRATION.md) · [runnable workbench](avr-examples/README.md) · [changelog](CHANGELOG.md)
+
 > A lightweight virtual execution environment for centralized AI agents.
 
 Agent Virtual Runtime is a Java 11+ framework that gives an AI agent a virtual world—files, commands, skills, artifacts and other agents—without provisioning a container or VM for every run. AVR owns a model-neutral agent loop while applications retain control over identity, tenancy, workspace naming and storage topology.
+
+AVR is designed to be embedded in an existing Java service. A host application resolves the Workspace for each request, then calls an injected `Agent` or an `Agent` created by `AgentFactory`. AVR runs the model/tool loop and emits events; the host keeps ownership of HTTP APIs, authentication, quotas, secrets and business isolation. See [ARCHITECTURE.md](ARCHITECTURE.md) for the complete responsibility boundary and execution flow.
+
+### Choose an integration path
+
+| Scenario | Start here |
+| --- | --- |
+| Spring Boot Web service | Add `avr-spring-boot-starter`, configure YAML, inject `Agent` or `AgentFactory` |
+| Plain Java application | Assemble `OpenAiLlm`, `WorkspaceTools`, `AgentLoop` and `Agent` directly |
+| Existing storage platform | Implement `Workspace`, or adapt an `ObjectStore` for `ObjectWorkspace` |
+| Custom model protocol | Implement `Llm`; keep the rest of the Runtime unchanged |
+| Product UI or SSE service | Consume `RuntimeEventListener`; use `avr-examples` as a reference implementation |
 
 ## V1.0 features
 
@@ -177,6 +191,6 @@ The runnable examples build a stock-analysis agent with a real OpenAI-compatible
 
 Contributions use Gitmoji Conventional Commit subjects, for example `✨ feat: add an object-storage workspace`. See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
-完整的 Java、Maven、模型 SSE、Function Call、Tool、Workspace 和运行事件接入方式请参阅 [INTEGRATION.md](INTEGRATION.md)。
+Read [ARCHITECTURE.md](ARCHITECTURE.md) for the system boundary and [INTEGRATION.md](INTEGRATION.md) for complete Java, Maven, Spring, model SSE, Function Call, Tool, Workspace, plan and event integration.
 
 Licensed under the Apache License 2.0. See [LICENSE](LICENSE).

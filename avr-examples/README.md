@@ -1,6 +1,8 @@
 # AVR Examples
 
-`StockReportAgentExample` 展示一个接入者如何构建股票分析 Agent：从 `application.yml` 读取模型配置、准备虚拟 Workspace、注入财务分析 Skill、调用 OpenAI 兼容模型、处理流式 Function Call，并最终生成 `report.html`。
+本模块同时提供两类可运行示例：`StockReportAgentExample` 展示接入者如何构建股票分析 Agent；Spring Boot 工作台展示完整的多轮 Chat、SSE 恢复、计划、Tool 事件、虚拟文件树、文件编辑、模型选择、联网搜索和 Artifact 预览。两者都通过完整 `AgentRuntime` 工作，不会绕过 Runtime 直接调用模型。
+
+框架边界先阅读 [全局架构](../ARCHITECTURE.md)，Java/Spring API 见 [完整接入指南](../INTEGRATION.md)。本文件专注于如何配置、运行和二次开发示例应用。
 
 示例使用虚构公司和虚构数据，不提供投资建议，也不会联网获取实时行情。
 
@@ -202,9 +204,9 @@ export OPENAI_API_KEY="<从安全环境注入的密钥>"
 配置中确认 `AVR_API_URL`、`AVR_MODEL` 和 `OPENAI_API_KEY` 均已注入。
 不要将密钥写入受版本控制的文件。
 
-MiniMax-M3 官方标注的上下文窗口为 **1,000,000 token（输入与输出合计）**，
-并非固定的单次输出上限。示例默认不发送 `max_tokens`，避免将模型输出人为截断；
-实际可用长度仍由模型服务、当前输入长度和接入网关决定。如需限制单次输出成本，
+模型上下文窗口与单次输出上限是两个不同概念，具体数值由模型服务和接入网关决定。
+示例默认不发送 `max_tokens`，避免在不知道网关限制时人为截断输出；
+实际可用长度仍取决于模型、当前输入和网关策略。如需限制单次输出成本，
 Spring Boot 可设置 `AVR_LLM_OPENAI_MAX_TOKENS`；非 Spring 接入可在自定义 YAML 中
 配置 `max-tokens`，或通过 `OpenAiConfig.Builder.maxTokens(...)` 设置。
 

@@ -4,9 +4,23 @@
 
 维护者发布 Maven Central 请参阅 [发布指南](RELEASING.md)。
 
+文档导航：[全局架构与边界](ARCHITECTURE.md) · [完整接入指南](INTEGRATION.md) · [可运行工作台](avr-examples/README.md) · [版本记录](CHANGELOG.md)
+
 > 面向中心化 AI Agent 的轻量级虚拟执行环境。
 
 Agent Virtual Runtime 是一个兼容 Java 11 及以上版本的 Agent Runtime 框架。它为 AI Agent 提供由文件、命令、Skill、Artifact 和其他 Agent 组成的虚拟世界，无需为每次运行创建容器或虚拟机。AVR 负责执行标准 Agent Loop，接入应用继续掌控身份体系、Workspace 命名、隔离策略和存储结构。
+
+AVR 的定位是嵌入现有 Java 服务，而不是再启动一个独立 Agent Server。宿主应用为每次请求解析 Workspace，然后调用注入的 `Agent` 或由 `AgentFactory` 创建的 Agent；AVR 负责模型与 Tool 循环并输出运行事件，HTTP API、认证、配额、密钥和业务隔离仍由宿主应用掌控。完整职责边界和执行链路见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+
+### 选择接入方式
+
+| 场景 | 推荐入口 |
+| --- | --- |
+| Spring Boot Web 服务 | 引入 `avr-spring-boot-starter`，配置 YAML，注入 `Agent` 或 `AgentFactory` |
+| 普通 Java 应用 | 直接装配 `OpenAiLlm`、`WorkspaceTools`、`AgentLoop` 和 `Agent` |
+| 已有内部存储 | 实现 `Workspace`，或用 `ObjectStore` 适配 `ObjectWorkspace` |
+| 其他模型协议 | 实现 `Llm`，无需改动 Runtime 和 Tool |
+| 产品 UI 或 SSE 服务 | 消费 `RuntimeEventListener`，参考 `avr-examples` 的完整工作台 |
 
 ## V1.0 能力
 
@@ -287,7 +301,9 @@ mvn -pl avr-examples exec:java
 
 ## 文档与贡献
 
+- 全局架构与职责边界：[ARCHITECTURE.md](ARCHITECTURE.md)
 - 完整接入说明：[INTEGRATION.md](INTEGRATION.md)
+- 可部署工作台说明：[avr-examples/README.md](avr-examples/README.md)
 - Spring Boot Starter：[avr-spring-boot-starter/README.md](avr-spring-boot-starter/README.md)
 - 贡献指南：[CONTRIBUTING.md](CONTRIBUTING.md)
 - 安全策略：[SECURITY.md](SECURITY.md)

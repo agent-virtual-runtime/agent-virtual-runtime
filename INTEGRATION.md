@@ -2,6 +2,18 @@
 
 本文介绍如何把 Agent Virtual Runtime（AVR）嵌入 Java 应用。AVR 要求 JDK 11 或更高版本，应用负责选择模型、组织 Workspace 标识以及实现自身的认证和业务权限。
 
+开始前建议先阅读 [全局架构](ARCHITECTURE.md)。AVR 是嵌入式 Runtime，不会自行启动公共 HTTP Server：接入方把模型、Workspace、Tool 和策略装配给 Runtime，再由自己的 Controller、RPC 或任务系统调用。
+
+| 目标 | 对应章节 |
+| --- | --- |
+| Spring Boot 配置后直接注入 | 第 2 节 |
+| 普通 Java 手动装配 | 第 3 节 |
+| 模型、SSE 和联网搜索 | 第 4 节 |
+| 标准 Tool 与自定义 Tool | 第 5、6 节 |
+| Workspace、长文件和 Artifact | 第 7 节 |
+| Skill、事件与前端协议 | 第 8、9、12 节 |
+| 多轮计划和多 Agent | 第 10、11 节 |
+
 ## 1. Maven 依赖
 
 AVR 按能力拆分模块。发布到 Maven 仓库后，通常至少引入 Core、统一 Storage 模块和一个模型实现：
@@ -42,7 +54,84 @@ AVR 按能力拆分模块。发布到 Maven 仓库后，通常至少引入 Core�
 
 在 Maven 正式发布前，可以从源码执行 `mvn clean install` 安装到本地仓库。
 
-## 2. 最小接入
+## 2. Spring Boot 接入
+
+Web 服务通常只需引入 Starter：
+
+```xml
+<dependency>
+    <groupId>io.github.agent-virtual-runtime</groupId>
+    <artifactId>avr-spring-boot-starter</artifactId>
+    <version>${avr.version}</version>
+</dependency>
+```
+
+`application.yml`：
+
+```yaml
+avr:
+  llm:
+    openai:
+      api-url: ${AVR_API_URL:https://api.openai.com/v1}
+      api-key: ${OPENAI_API_KEY}
+      model: ${AVR_MODEL:gpt-4.1-mini}
+      stream: true
+      temperature: 0.1
+      max-tokens: 12000
+      timeout: 5m
+      max-retries: 2
+  agent:
+    name: report-agent
+    max-steps: 30
+    max-step-multiplier: 3
+    max-no-progress-rounds: 5
+    loop-timeout: 90m
+    tool-timeout: 2m
+    instructions: |
+      使用 Workspace 和已注册 Tool 完成任务。
+      文件变更后必须核对最终路径，不得凭空声称已经完成。
+  workspace:
+    type: disk
+    id: default-workspace
+    path: ${AVR_WORKSPACE_DIR:./data/avr-workspace}
+```
+
+配置单一 Workspace 时，Starter 会自动创建 `OpenAiConfig`、`Llm`、标准 Workspace Tool、`ToolRegistry`、`AgentLoopOptions`、`AgentRuntime`、`AgentFactory`、`Workspace` 和 `Agent`。业务 Service 可以直接注入：
+
+```java
+@Service
+public class ReportService {
+    private final Agent agent;
+
+    public ReportService(Agent agent) {
+        this.agent = agent;
+    }
+
+    public AgentResult generate(String prompt) {
+        return agent.input(prompt);
+    }
+}
+```
+
+中心化服务通常需要请求级 Workspace。此时不要配置全局 `avr.workspace.type`，由应用完成身份校验和 Workspace 映射，再使用 `AgentFactory`：
+
+```java
+Workspace workspace = workspaceResolver.resolve(requestContext);
+Agent agent = agentFactory.create(workspace);
+AgentResult result = agent.input(prompt);
+```
+
+自定义 Bean 会替换或扩展默认装配：
+
+- 声明 `Llm` 替换默认 `OpenAiLlm`；
+- 声明任意 `Tool` Bean 自动进入 `ToolRegistry`；
+- 声明 `ToolPolicy` 实现请求级授权；
+- 声明 `Skill` Bean 注入领域知识；
+- 声明 `RuntimeEventListener` Bean 接入日志、SSE、MQ 或指标；
+- 声明 `WebSearchProvider` Bean 自动注册 `web.search`；
+- 声明 `VirtualHttpClient` Bean 自动注册受控 `http.get`。
+
+## 3. 非 Spring 最小接入
 
 ```java
 import com.avr.api.Agent;
@@ -110,7 +199,7 @@ workspace.writeText("/inputs/data.txt", "revenue=120");
 
 AVR 不解释 Workspace ID。它可以是任务 ID、随机字符串、哈希值或业务自行定义的多级路径映射。
 
-## 3. OpenAI 兼容模型
+## 4. OpenAI 兼容模型
 
 ### application.yml
 
@@ -191,7 +280,26 @@ OpenAiConfig config = OpenAiConfig.builder()
 .stream(false)
 ```
 
-## 4. 自定义 Tool
+## 5. 标准 Tool 与自定义 Tool
+
+`WorkspaceTools.defaults()` 返回 AVR 的标准 Workspace 能力：
+
+| Tool | 操作 | 用途 |
+| --- | --- | --- |
+| `file.op` | `list`、`read`、`search`、`write`、`append`、`insert`、`replace_text`、`replace_lines`、`delete_lines`、`copy`、`move`、`delete` | 文件生命周期与长文本编辑 |
+| `directory.manage` | `list`、`create`、`copy`、`move`、`merge`、`delete` | 目录全生命周期；重命名使用 `move` |
+| `artifact.commit` | 提交目录和入口文件 | 生成不可变 HTML/CSS/JS 等产物快照 |
+| `plan.manage` | `create`、`revise`、`update`、`check` | 建立计划并用真实执行证据校验完成状态 |
+
+```java
+DefaultToolRegistry.Builder registry = DefaultToolRegistry.builder();
+WorkspaceTools.defaults().forEach(registry::register);
+ToolRegistry tools = registry.build();
+```
+
+这些 Tool 按领域收敛，模型通过 `op` 选择动作。文件能力不再重复包装成 `ls`、`cat`、`wc` 等虚拟命令。
+
+### 自定义业务 Tool
 
 ```java
 import com.avr.api.Tool;
@@ -234,7 +342,7 @@ ToolRegistry tools = DefaultToolRegistry.builder()
 
 工具可在 `ToolDefinition` 指定默认 `displayName` 和 `ToolDisplayType`，供接入方 UI 展示。若同一工具的不同操作返回不同结构，可用 `ToolResult.success(content, rowCount, displayType)` 覆盖单次结果；支持 `TEXT`、`CODE`、`JSON`、`TABLE`、`TREE`、`MARKDOWN`。`rowCount` 是结果摘要中的业务行数，由工具给出，不要求前端猜测 JSON 内容。
 
-## 5. 并发与串行 Tool
+## 6. 并发与串行 Tool
 
 Tool 默认使用 `PARALLEL`。同一模型响应中的相邻并行 Tool 会并发执行，但结果始终按照原始 `tool_calls` 顺序写回模型上下文。
 
@@ -274,7 +382,7 @@ AgentRuntime runtime = new AgentLoop(
 
 线程池生命周期由接入方管理。应用关闭时应调用 `toolExecutor.shutdown()`。
 
-## 6. Workspace
+## 7. Workspace
 
 `com.avr.api.Workspace` 是 AVR 唯一的虚拟文件系统接口。所有内置实现统一位于 `avr-storage` 模块的 `com.avr.storage` 包，不需要为不同存储方式选择不同的 Maven 依赖。
 
@@ -332,7 +440,7 @@ Workspace workspace = new ObjectWorkspace(
 
 AVR 使用保留的 `/.avr` 命名空间保存内部元数据。这个目录不会出现在 `list()` 结果中，Agent 也不能读取、写入或删除其中内容。自定义 `Workspace` 实现应提供等价的元数据隔离和持久化语义。
 
-## 7. Skill
+## 8. Skill
 
 Skill 是注入本次运行的可复用指令：
 
@@ -352,7 +460,7 @@ Agent agent = Agent.builder()
 
 `tools` 字段是提示信息，不代替 `ToolRegistry` 注册和 `ToolPolicy` 授权。
 
-## 8. 运行事件与异步调用
+## 9. 运行事件与异步调用
 
 运行观测是 Runtime 级能力，不挂在 `Agent` 或 `AgentRequest` 上。非 Spring 应用在创建 `AgentLoop` 时注册监听器：
 
@@ -439,7 +547,68 @@ public InMemoryRunTracker runTracker() {
 
 如果需要持久化、跨节点聚合或实时推送，直接实现 `RuntimeEventListener` 并写入数据库、Redis、Kafka、SSE 或 WebSocket。AVR 不启动 HTTP Server，也不规定应用的 URL、鉴权、Workspace 解析和响应协议。
 
-## 9. 生产接入建议
+## 10. 多轮会话、计划与完成校验
+
+AVR 不强制提供某一种会话存储。应用保存普通用户/助手消息，在下一轮通过 `history` 传入；模型 Tool Call 和 Tool Result 由当前运行内部维护，不应伪造后重新注入：
+
+```java
+AgentRequest request = AgentRequest.builder()
+        .runId(runId)
+        .agent("report-agent")
+        .prompt(prompt)
+        .workspace(workspace)
+        .history(previousMessages)
+        .model(selectedModel)
+        .maxSteps(30)
+        .planMode(true)
+        .webSearchMode(WebSearchMode.RUNTIME)
+        .completionCheck(ws -> ws.exists("/workspace/report/index.html"))
+        .build();
+
+AgentResult result = runtime.run(request);
+```
+
+`history` 只接受不含 Tool Call 的普通 `USER` 和 `ASSISTANT` 消息。生产环境应把会话和运行记录持久化；示例工程为了便于理解，只提供有容量上限的进程内会话索引，磁盘 Workspace 文件可以跨进程恢复，但内存中的对话和 SSE 订阅不能替代数据库。
+
+开启 `planMode` 后，模型必须先创建计划，再以真实成功 Tool 调用推进步骤，最后执行 `plan.manage.check`。步骤可以声明：
+
+- `verifyPath`：目标文件必须存在；
+- `verifyDirectory`：目标目录必须存在；
+- `minBytes`：单文件大小或目录下文件总大小达到要求；
+- `absentPath`：旧路径必须已经移除。
+
+计划模式防止“没有执行却声称完成”，但不能证明报告内容在业务语义上正确。财务口径、审批状态等复杂要求应通过 `completionCheck` 或自定义校验 Tool 实现。
+
+## 11. 多 Agent 协同
+
+应用先为专业 Agent 准备独立 `AgentRuntime`，再注册到 `AgentTaskManager`。主 Agent 通过单一 `agent.manage` Tool 管理生命周期：
+
+```java
+AgentTaskManager manager = new AgentTaskManager()
+        .register("research-agent", "资料检索与事实校验", researchRuntime)
+        .register("writer-agent", "长报告编写", writerRuntime);
+
+Tool agentManage = new AgentManageTool(manager);
+```
+
+支持 `list_agents`、`list_tasks`、`create`、`execute`、`result` 和 `cancel`。子 Agent 使用当前请求传入的 Workspace 与 `ExecutionContext`，但各 Agent 的模型、Skill、Tool、预算和授权策略仍由应用决定。任务管理器不是租户系统，身份隔离和配额仍应在应用边界完成。
+
+## 12. Artifact、SSE 与产品 UI
+
+生成 Web 页面时，Agent 应在同一虚拟目录中使用相对引用，例如 `index.html` 引用 `styles.css` 和 `app.js`。随后使用 `artifact.commit` 指定目录与入口文件；Workspace 会保存提交时的不可变快照，使预览不受后续文件修改影响。
+
+AVR 只产生运行事件，不规定 HTTP 路由。产品层通常按以下方式映射：
+
+1. `model.delta` 增量追加最终正文；
+2. `model.reasoning_delta` 放入独立、可折叠的思考区域；
+3. 用相同 `toolCallId` 将 `tool.started` 原位更新为 `tool.completed` 或 `tool.failed`；
+4. 根据 `displayType` 渲染文本、代码、JSON、表格、树或 Markdown；
+5. Workspace 变更事件触发文件树和当前预览刷新；
+6. 将事件按 `runId + sequence` 持久化，浏览器重连时先回放，再订阅实时流。
+
+`avr-examples` 是完整参考实现而不是核心框架的强制 Server。它演示了 Chat SSE、断线续传、多轮历史、模型选择、联网搜索开关、计划面板、Tool 事件、虚拟文件树、文件编辑和 HTML Artifact 预览。接入方可以复用页面和 Controller 思路，也可以仅使用 AVR Runtime 自行定义协议。
+
+## 13. 生产接入建议
 
 - Workspace 的分配、认证、租户隔离和配额由接入应用处理；
 - 使用 `ToolPolicy` 做请求级授权，不要仅依赖 Prompt；
